@@ -1,62 +1,57 @@
-import { table, reducer, Column, Table } from '@clockworklabs/spacetimedb-sdk';
+import { schema, table, t } from 'spacetimedb/server';
 
-// 1. Define the Task Table
-@table({ name: 'task' })
-export class Task extends Table {
-  @Column({ primary: true })
-  id!: string;
-
-  @Column()
-  description!: string;
-
-  @Column()
-  status!: string; // 'PENDING' | 'IN_PROGRESS' | 'COMPLETED'
-
-  @Column()
-  nodeId!: string; // Foreign key linking task to an OrgNode
-}
-
-// 2. Define the OrgNode Table
-@table({ name: 'org_node' })
-export class OrgNode extends Table {
-  @Column({ primary: true })
-  id!: string;
-
-  @Column()
-  name!: string;
-
-  @Column()
-  type!: string; // 'AGENT' | 'HUMAN'
-
-  @Column()
-  status!: string; // 'IDLE' | 'WORKING' | 'BLOCKED_BY_HUMAN'
-
-  // SpacetimeDB handles lists as stringified JSON or relational sub-tables.
-  // For the hackathon, storing serialized string arrays keeps reads/writes fast.
-  @Column()
-  reportsToJson!: string; // e.g. '["node-1"]'
-
-  @Column()
-  subordinatesJson!: string; // e.g. '["node-2", "node-3"]'
-}
-
-// 3. Define Reducers (Server Actions)
-@reducer()
-export function addNode(ctx: any, id: string, name: string, type: string) {
-  OrgNode.insert({
-    id,
-    name,
-    type,
-    status: 'IDLE',
-    reportsToJson: '[]',
-    subordinatesJson: '[]',
-  });
-}
-
-@reducer()
-export function updateStatus(ctx: any, id: string, status: string) {
-  const node = OrgNode.findById(id);
-  if (node) {
-    OrgNode.update({ ...node, status });
+// 1. Define Task Table
+const task = table(
+  { name: 'task', public: true },
+  {
+    id: t.string().primaryKey(),
+    description: t.string(),
+    status: t.string(), // 'PENDING' | 'IN_PROGRESS' | 'COMPLETED'
+    nodeId: t.string(),
   }
-}
+);
+
+// 2. Define OrgNode Table
+const orgNode = table(
+  { name: 'org_node', public: true },
+  {
+    id: t.string().primaryKey(),
+    name: t.string(),
+    type: t.string(), // 'AGENT' | 'HUMAN'
+    status: t.string(), // 'IDLE' | 'WORKING' | 'BLOCKED_BY_HUMAN'
+    reportsToJson: t.string(),
+    subordinatesJson: t.string(),
+  }
+);
+
+// 3. Register Database Schema
+const spacetimedb = schema({ task, orgNode });
+
+// 4. Export Reducers
+export const add_node = spacetimedb.reducer(
+  { name: 'add_node' },
+  { id: t.string(), name: t.string(), type: t.string() },
+  (ctx, { id, name, type }) => {
+    ctx.db.orgNode.insert({
+      id,
+      name,
+      type,
+      status: 'IDLE',
+      reportsToJson: '[]',
+      subordinatesJson: '[]',
+    });
+  }
+);
+
+export const update_status = spacetimedb.reducer(
+  { name: 'update_status' },
+  { id: t.string(), status: t.string() },
+  (ctx, { id, status }) => {
+    const node = ctx.db.orgNode.id.find(id);
+    if (node) {
+      ctx.db.orgNode.id.update({ ...node, status });
+    }
+  }
+);
+
+export default spacetimedb;
