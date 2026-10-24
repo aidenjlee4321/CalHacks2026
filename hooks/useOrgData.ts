@@ -114,9 +114,8 @@ export function useOrgData() {
             const table = conn.db?.orgNode || conn.tables?.orgNode;
             if (table && typeof table.iter === 'function') {
                 const rows = Array.from(table.iter()) as OrgNode[];
-                if (rows.length > 0) {
-                    setNodes(rows.filter((r) => r.type !== 'System'));
-                }
+                // Empty table -> keep showing the local demo org so edits stay visible
+                setNodes(rows.length > 0 ? rows.filter((r) => r.type !== 'System') : demoNodes);
             }
         };
 
@@ -124,9 +123,7 @@ export function useOrgData() {
             const table = conn.db?.taskItem || conn.db?.task || conn.tables?.task;
             if (table && typeof table.iter === 'function') {
                 const rows = Array.from(table.iter()) as TaskItem[];
-                if (rows.length > 0) {
-                    setTasks(rows);
-                }
+                setTasks(rows.length > 0 ? rows : demoTasks);
             }
         };
 
