@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect, useContext, createContext } from 'react';
+import { useState, useEffect } from 'react';
+import { useSpacetimeDB } from 'spacetimedb/react';
 
 // Types
 export interface TaskItem {
@@ -20,38 +21,8 @@ export interface OrgNode {
     subordinatesJson?: string;
 }
 
-// Spacetime Context Fallback
-interface SpacetimeContextType {
-    conn: any;
-    connected: boolean;
-    identity: string | null;
-}
-
-const SpacetimeContext = createContext<SpacetimeContextType>({
-    conn: null,
-    connected: false,
-    identity: null,
-});
-
-let externalUseSpacetime: (() => SpacetimeContextType) | null = null;
-try {
-    // @ts-ignore
-    const mod = require('@/components/LiveSpacetimeProvider');
-    externalUseSpacetime = mod.useSpacetime || mod.default?.useSpacetime;
-} catch { }
-
-function useSpacetimeHook(): SpacetimeContextType {
-    if (externalUseSpacetime) {
-        try {
-            return externalUseSpacetime();
-        } catch { }
-    }
-    return useContext(SpacetimeContext);
-}
-
 // Initial Base Dataset Generator
 const createBaseDataset = () => {
-    const statuses = ['Active', 'Idle', 'Busy', 'Offline'];
     const taskTemplates = [
         'Audit workspace security permissions',
         'Process neural network weight batch',
@@ -113,80 +84,150 @@ const createBaseDataset = () => {
 const { nodes: INITIAL_NODES, tasks: INITIAL_TASKS } = createBaseDataset();
 
 export function useOrgData() {
-    const spacetime = useSpacetimeHook();
+    // Read active connection state directly from SpacetimeDB React SDK
+    const { isActive: isConnected, identity: rawIdentity, getConnection } = useSpacetimeDB() as any;
+    const conn = typeof getConnection === 'function' ? getConnection() : null;
+    const identity = rawIdentity ? (rawIdentity.toHexString ? rawIdentity.toHexString() : String(rawIdentity)) : null;
+
     const [demoNodes, setDemoNodes] = useState<OrgNode[]>(INITIAL_NODES);
     const [nodes, setNodes] = useState<OrgNode[]>(INITIAL_NODES);
     const [demoTasks, setDemoTasks] = useState<TaskItem[]>(INITIAL_TASKS);
     const [tasks, setTasks] = useState<TaskItem[]>(INITIAL_TASKS);
 
-    const isConnected = spacetime.connected || true;
-    const identity = spacetime.identity || 'demo_identity_0x8f2a9c';
-
+    // Synchronize SpacetimeDB table subscriptions & event listeners
     useEffect(() => {
-        if (!spacetime.conn) {
+        if (!conn) {
             setNodes(demoNodes);
             setTasks(demoTasks);
             return;
         }
 
+        // Subscribe to SpacetimeDB queries
+        if (typeof conn.subscribe === 'function') {
+            conn.subscribe([
+                'SELECT * FROM org_node',
+                'SELECT * FROM task_item',
+            ]);
+        }
+
         const updateNodes = () => {
-            const table = (spacetime.conn as any).db?.orgNode || (spacetime.conn as any).tables?.orgNode;
-            if (table) {
+            const table = conn.db?.orgNode || conn.tables?.orgNode;
+            if (table && typeof table.iter === 'function') {
                 const rows = Array.from(table.iter()) as OrgNode[];
-                setNodes(rows.filter((r) => r.type !== 'System'));
+                if (rows.length > 0) {
+                    setNodes(rows.filter((r) => r.type !== 'System'));
+                }
             }
         };
 
         const updateTasks = () => {
-            const table = (spacetime.conn as any).db?.task || (spacetime.conn as any).tables?.task;
-            if (table) {
+            const table = conn.db?.taskItem || conn.db?.task || conn.tables?.task;
+            if (table && typeof table.iter === 'function') {
                 const rows = Array.from(table.iter()) as TaskItem[];
-                setTasks(rows);
+                if (rows.length > 0) {
+                    setTasks(rows);
+                }
             }
         };
 
+        // Initial table load
         updateNodes();
         updateTasks();
-    }, [spacetime.conn, demoNodes, demoTasks]);
 
+        // Attach event listeners for real-time broadcasts
+        const nodeTable = conn.db?.orgNode || conn.tables?.orgNode;
+        const taskTable = conn.db?.taskItem || conn.db?.task || conn.tables?.task;
+
+        if (nodeTable?.onInsert) nodeTable.onInsert(updateNodes);
+        if (nodeTable?.onUpdate) nodeTable.onUpdate(updateNodes);
+        if (nodeTable?.onDelete) nodeTable.onDelete(updateNodes);
+
+        if (taskTable?.onInsert) taskTable.onInsert(updateTasks);
+        if (taskTable?.onUpdate) taskTable.onUpdate(updateTasks);
+        if (taskTable?.onDelete) taskTable.onDelete(updateTasks);
+
+        return () => {
+            if (nodeTable?.removeOnInsert) nodeTable.removeOnInsert(updateNodes);
+            if (nodeTable?.removeOnUpdate) nodeTable.removeOnUpdate(updateNodes);
+            if (nodeTable?.removeOnDelete) nodeTable.removeOnDelete(updateNodes);
+
+            if (taskTable?.removeOnInsert) taskTable.removeOnInsert(updateTasks);
+            if (taskTable?.removeOnUpdate) taskTable.removeOnUpdate(updateTasks);
+            if (taskTable?.removeOnDelete) taskTable.removeOnDelete(updateTasks);
+        };
+    }, [conn, demoNodes, demoTasks]);
+
+    // Mutation Methods with SpacetimeDB Reducer Calls + Fallback
     const addNode = (name: string, type: string, superiorId: string) => {
         const newId = crypto.randomUUID();
         const finalName = name.trim() || 'New Member';
         const newNode: OrgNode = { id: newId, name: finalName, type, status: 'Idle', superior: superiorId || undefined };
-        setDemoNodes((prev) => [...prev, newNode]);
+
+        if (conn?.reducers?.addNode) {
+            conn.reducers.addNode(newNode);
+        } else {
+            setDemoNodes((prev) => [...prev, newNode]);
+        }
         return newId;
     };
 
     const updateNode = (id: string, name: string, type: string, superiorId: string) => {
-        setDemoNodes((prev) =>
-            prev.map((n) => (n.id === id ? { ...n, name: name.trim() || 'Unnamed Node', type, superior: superiorId || undefined } : n))
-        );
+        if (conn?.reducers?.updateNode) {
+            conn.reducers.updateNode({ id, name: name.trim() || 'Unnamed Node', type, superior: superiorId || '' });
+        } else {
+            setDemoNodes((prev) =>
+                prev.map((n) => (n.id === id ? { ...n, name: name.trim() || 'Unnamed Node', type, superior: superiorId || undefined } : n))
+            );
+        }
+    };
+
+    const updateNodeStatus = (id: string, status: string) => {
+        if (conn?.reducers?.updateNodeStatus) {
+            conn.reducers.updateNodeStatus({ id, status });
+        } else {
+            setDemoNodes((prev) => prev.map((n) => (n.id === id ? { ...n, status } : n)));
+            setNodes((prev) => prev.map((n) => (n.id === id ? { ...n, status } : n)));
+        }
     };
 
     const deleteNode = (id: string) => {
-        setDemoNodes((prev) => prev.filter((n) => n.id !== id));
+        if (conn?.reducers?.deleteNode) {
+            conn.reducers.deleteNode({ id });
+        } else {
+            setDemoNodes((prev) => prev.filter((n) => n.id !== id));
+        }
     };
 
     const addTask = (nodeId: string, title: string) => {
         const newTask: TaskItem = { id: crypto.randomUUID(), assignedNodeId: nodeId, title, completed: false };
-        setDemoTasks((prev) => [...prev, newTask]);
+        if (conn?.reducers?.addTask) {
+            conn.reducers.addTask(newTask);
+        } else {
+            setDemoTasks((prev) => [...prev, newTask]);
+        }
     };
 
     const deleteTask = (taskId: string) => {
-        setDemoTasks((prev) => prev.filter((t) => t.id !== taskId));
+        if (conn?.reducers?.deleteTask) {
+            conn.reducers.deleteTask({ taskId });
+        } else {
+            setDemoTasks((prev) => prev.filter((t) => t.id !== taskId));
+        }
     };
 
     const toggleTask = (taskId: string) => {
-        setDemoTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, completed: !t.completed } : t)));
-    };
-
-    const updateNodeStatus = (id: string, status: string) => {
-        setDemoNodes((prev) => prev.map((n) => (n.id === id ? { ...n, status } : n)));
+        if (conn?.reducers?.toggleTask) {
+            conn.reducers.toggleTask({ taskId });
+        } else {
+            setDemoTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, completed: !t.completed } : t)));
+        }
     };
 
     return {
         nodes,
         tasks,
+        setNodes,
+        setTasks,
         isConnected,
         identity,
         addNode,
