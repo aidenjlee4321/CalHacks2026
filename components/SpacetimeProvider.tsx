@@ -1,27 +1,66 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { SpacetimeDBProvider } from 'spacetimedb/react';
+import React, { createContext, useContext, useEffect, useState } from 'react';
 import { DbConnection } from '../lib/module_bindings';
 
-export default function SpacetimeProvider({ children }: { children: React.ReactNode }) {
-  // Only connect in the browser (not while Next.js renders on the server)
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+interface SpacetimeContextType {
+    connected: boolean;
+    identity: string | null;
+    conn: DbConnection | null;
+}
 
-  const connectionBuilder = useMemo(
-    () =>
-      DbConnection.builder()
-        .withUri('wss://maincloud.spacetimedb.com')
-        .withDatabaseName('org-backend-afa0s'),
-    []
-  );
+const SpacetimeContext = createContext<SpacetimeContextType>({
+    connected: false,
+    identity: null,
+    conn: null,
+});
 
-  if (!mounted) return null;
+export const useSpacetime = () => useContext(SpacetimeContext);
 
-  return (
-    <SpacetimeDBProvider connectionBuilder={connectionBuilder}>
-      {children}
-    </SpacetimeDBProvider>
-  );
+export function SpacetimeProvider({ children }: { children: React.ReactNode }) {
+    const [connected, setConnected] = useState(false);
+    const [identity, setIdentity] = useState<string | null>(null);
+    const [conn, setConn] = useState<DbConnection | null>(null);
+    const [mounted, setMounted] = useState(false);
+
+    useEffect(() => {
+        setMounted(true);
+
+        const connection = DbConnection.builder()
+            .withUri('wss://maincloud.spacetimedb.com')
+            .withDatabaseName('org-backend-afa0s')
+            .onConnect((c, id) => {
+                console.log('Connected to SpacetimeDB Cloud!', id);
+                setConnected(true);
+                setIdentity(typeof id === 'string' ? id : id.toHexString());
+                setConn(c);
+
+                // Subscribe to queries
+                c.subscriptionBuilder().subscribe([
+                    'SELECT * FROM org_node',
+                    'SELECT * FROM task',
+                ]);
+            })
+            .onDisconnect(() => {
+                console.log('Disconnected from SpacetimeDB');
+                setConnected(false);
+                setConn(null);
+            })
+            .onConnectError((_, err) => {
+                console.error('SpacetimeDB connection error:', err);
+            })
+            .build();
+
+        return () => {
+            connection.disconnect();
+        };
+    }, []);
+
+    if (!mounted) return null;
+
+    return (
+        <SpacetimeContext.Provider value={{ connected, identity, conn }}>
+            {children}
+        </SpacetimeContext.Provider>
+    );
 }

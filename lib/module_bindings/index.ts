@@ -33,21 +33,19 @@ import {
   type SubscriptionHandleImpl as __SubscriptionHandleImpl,
 } from "spacetimedb";
 
-// Import all reducer arg schemas
-import AddNodeReducer from "./add_node_reducer";
 import AssignTaskReducer from "./assign_task_reducer";
 import CompleteTaskReducer from "./complete_task_reducer";
 import LogActivityReducer from "./log_activity_reducer";
 import RequestHelpReducer from "./request_help_reducer";
 import ResetDemoReducer from "./reset_demo_reducer";
 import ResolveHandoffReducer from "./resolve_handoff_reducer";
+// Import all reducer arg schemas
+import AddNodeReducer from "./add_node_reducer";
 import UpdateStatusReducer from "./update_status_reducer";
 
 // Import all procedure arg schemas
 
 // Import all table schema definitions
-import ActivityRow from "./activity_table";
-import HandoffRow from "./handoff_table";
 import OrgNodeRow from "./org_node_table";
 import TaskRow from "./task_table";
 
@@ -55,28 +53,6 @@ import TaskRow from "./task_table";
 
 /** The schema information for all tables in this module. This is defined the same was as the tables would have been defined in the server. */
 const tablesSchema = __schema({
-  activity: __table({
-    name: 'activity',
-    indexes: [
-      { accessor: 'id', name: 'activity_id_idx_btree', algorithm: 'btree', columns: [
-        'id',
-      ] },
-    ],
-    constraints: [
-      { name: 'activity_id_key', constraint: 'unique', columns: ['id'] },
-    ],
-  }, ActivityRow),
-  handoff: __table({
-    name: 'handoff',
-    indexes: [
-      { accessor: 'id', name: 'handoff_id_idx_btree', algorithm: 'btree', columns: [
-        'id',
-      ] },
-    ],
-    constraints: [
-      { name: 'handoff_id_key', constraint: 'unique', columns: ['id'] },
-    ],
-  }, HandoffRow),
   orgNode: __table({
     name: 'org_node',
     indexes: [
@@ -101,6 +77,7 @@ const tablesSchema = __schema({
   }, TaskRow),
 });
 
+/** The schema information for all reducers in this module. This is defined the same way as the reducers would have been defined in the server, except the body of the reducer is omitted in code generation. */
 /** The schema information for all reducers in this module. This is defined the same way as the reducers would have been defined in the server, except the body of the reducer is omitted in code generation. */
 const reducersSchema = __reducers(
   __reducerSchema("add_node", AddNodeReducer),
@@ -170,3 +147,4 @@ export class DbConnection extends __DbConnectionImpl<typeof REMOTE_MODULE> {
   };
 }
 
+export * from './types';
