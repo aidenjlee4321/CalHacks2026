@@ -682,6 +682,38 @@ function NodeInspector({
 }) {
   const supId = parseSuperior(selectedNode);
   const superiorNode = supId ? nodes.find((n) => n.id === supId) : null;
+  const [investigating, setInvestigating] = useState(false);
+  const [finding, setFinding] = useState<any>(null);
+
+  const handleRunInvestigation = async () => {
+    setInvestigating(true);
+    setFinding(null);
+
+    try {
+      const res = await fetch('/api/investigations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targetNode: selectedNode, nodes, tasks }),
+      });
+
+      // 1. Check if the HTTP response status is OK (200-299)
+      if (!res.ok) {
+        const errorText = await res.text(); // Read HTML or raw text safely
+        console.error(`Server error (${res.status}):`, errorText);
+        return;
+      }
+
+      // 2. Safe to parse JSON only after confirming res.ok
+      const data = await res.json();
+      if (data.success) {
+        setFinding(data.finding);
+      }
+    } catch (err) {
+      console.error('Fetch error:', err);
+    } finally {
+      setInvestigating(false);
+    }
+  };
 
   return (
     <aside className="w-80 border-l border-slate-800 bg-slate-900/90 backdrop-blur p-6 z-20 flex flex-col justify-between shadow-2xl overflow-y-auto">
@@ -700,10 +732,10 @@ function NodeInspector({
           <div className="p-4 bg-slate-950 rounded-xl border border-slate-800">
             <span
               className={`text-xs font-bold uppercase px-2 py-0.5 rounded border inline-block mb-1 ${selectedNode.type === 'Lead'
-                  ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
-                  : selectedNode.type === 'Worker'
-                    ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/30'
-                    : 'bg-purple-500/10 text-purple-400 border-purple-500/30'
+                ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                : selectedNode.type === 'Worker'
+                  ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/30'
+                  : 'bg-purple-500/10 text-purple-400 border-purple-500/30'
                 }`}
             >
               {selectedNode.type}
@@ -736,6 +768,44 @@ function NodeInspector({
             </div>
           </div>
 
+          {/* Investigator Action & Findings Panel */}
+          <div className="border-t border-slate-800 pt-4 space-y-3">
+            <button
+              onClick={handleRunInvestigation}
+              disabled={investigating}
+              className="w-full py-2 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-semibold text-xs rounded-lg transition-colors flex items-center justify-center gap-1.5 shadow-md shadow-purple-600/20"
+            >
+              {investigating ? '🔍 Analyzing Evidence...' : '🔬 Run Agent Investigation'}
+            </button>
+
+            {finding && (
+              <div className="p-3 bg-purple-950/40 border border-purple-800/50 rounded-lg space-y-2 text-xs">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-purple-400 block">
+                  Diagnosis & Hypothesis
+                </span>
+                <p className="text-slate-200 leading-relaxed">{finding.hypothesis}</p>
+
+                {finding.facts && finding.facts.length > 0 && (
+                  <div>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-purple-400 block mb-1">
+                      Key Facts
+                    </span>
+                    <ul className="list-disc list-inside space-y-0.5 text-[11px] text-slate-300">
+                      {finding.facts.map((fact: string, idx: number) => (
+                        <li key={idx}>{fact}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                <span className="text-[10px] font-bold uppercase tracking-wider text-purple-400 block pt-1">
+                  Recommended Action
+                </span>
+                <p className="text-amber-300 font-medium">{finding.recommendedAction}</p>
+              </div>
+            )}
+          </div>
+
           <TaskManagerSection
             selectedNode={selectedNode}
             tasks={tasks}
@@ -763,7 +833,7 @@ export default function Page() {
     isConnected,
     identity,
     addNode,
-    updateNode, // <--- ADD THIS
+    updateNode,
     updateNodeStatus,
     deleteNode,
     addTask,
@@ -964,8 +1034,8 @@ export default function Page() {
                     setSelectedNodeId(node.id);
                   }}
                   className={`interactive-card w-full cursor-pointer rounded-xl p-4 transition-all duration-200 border shadow-xl ${isSelected
-                      ? 'bg-slate-900 border-indigo-500 shadow-indigo-500/25 ring-2 ring-indigo-500/50 scale-[1.02] z-10'
-                      : 'bg-slate-900/95 border-slate-800 hover:border-slate-700 hover:bg-slate-900'
+                    ? 'bg-slate-900 border-indigo-500 shadow-indigo-500/25 ring-2 ring-indigo-500/50 scale-[1.02] z-10'
+                    : 'bg-slate-900/95 border-slate-800 hover:border-slate-700 hover:bg-slate-900'
                     }`}
                 >
                   <div className="flex items-center justify-between mb-2">
@@ -1017,8 +1087,8 @@ export default function Page() {
                                 setSelectedNodeId(worker.id);
                               }}
                               className={`flex items-center justify-between p-2 rounded-lg text-xs transition-all border cursor-pointer ${isWorkerSelected
-                                  ? 'bg-indigo-950/80 border-indigo-500 text-indigo-100 font-medium ring-1 ring-indigo-500/40 shadow-md'
-                                  : 'bg-slate-900/80 border-slate-800 text-slate-300 hover:bg-slate-800 hover:border-slate-700'
+                                ? 'bg-indigo-950/80 border-indigo-500 text-indigo-100 font-medium ring-1 ring-indigo-500/40 shadow-md'
+                                : 'bg-slate-900/80 border-slate-800 text-slate-300 hover:bg-slate-800 hover:border-slate-700'
                                 }`}
                             >
                               <div className="flex items-center gap-2 truncate pr-2">
