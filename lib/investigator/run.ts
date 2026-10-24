@@ -1,8 +1,8 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { INVESTIGATOR_TOOLS, handleToolCall } from './tools';
 import { OrgNode, TaskItem } from '@/hooks/useOrgData';
-
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+import { anthropic, AGENT_MODEL, EMPTY_USAGE, addUsage, summarizeUsage } from '@/lib/claude';
+import { recordTelemetry } from '@/lib/telemetryStore';
 
 export interface FindingResult {
     facts: string[];
@@ -16,11 +16,29 @@ export async function runInvestigation(
     nodes: OrgNode[],
     tasks: TaskItem[]
 ): Promise<FindingResult> {
-    let modelId = 'claude-3-5-sonnet-latest';
-    try {
-        const list = await anthropic.models.list();
-        if (list.data?.[0]?.id) modelId = list.data[0].id;
-    } catch { }
+    const startTime = Date.now();
+    let usage = EMPTY_USAGE;
+
+    // One telemetry record per investigation, with usage summed across every turn
+    const recordRun = (status: string, extra: { resultText?: string; error?: string } = {}) =>
+        recordTelemetry({
+            agentId: 'investigator',
+            agentName: 'Investigator',
+            source: 'investigation',
+            model: AGENT_MODEL,
+            status,
+            latencyMs: Date.now() - startTime,
+            tokens: usage.totalTokens,
+            totalTokens: usage.totalTokens,
+            promptTokens: usage.inputTokens,
+            completionTokens: usage.outputTokens,
+            cacheReadTokens: usage.cacheReadTokens,
+            cacheWriteTokens: usage.cacheWriteTokens,
+            costUsd: usage.costUsd,
+            details: { targetNodeId: targetNode.id },
+            timestamp: Date.now(),
+            ...extra,
+        });
 
     const messages: Anthropic.MessageParam[] = [
         {
@@ -32,49 +50,57 @@ export async function runInvestigation(
     let toolTurns = 0;
     const MAX_TURNS = 5;
 
-    while (toolTurns < MAX_TURNS) {
-        const response = await anthropic.messages.create({
-            model: modelId,
-            max_tokens: 1024,
-            tools: INVESTIGATOR_TOOLS,
-            messages,
-        });
+    try {
+        while (toolTurns < MAX_TURNS) {
+            const response = await anthropic.messages.create({
+                model: AGENT_MODEL,
+                max_tokens: 16000,
+                tools: INVESTIGATOR_TOOLS,
+                messages,
+            });
+            usage = addUsage(usage, summarizeUsage(response.model, response.usage));
 
-        if (response.stop_reason === 'tool_use') {
-            toolTurns++;
-            messages.push({ role: 'assistant', content: response.content });
+            if (response.stop_reason === 'tool_use') {
+                toolTurns++;
+                messages.push({ role: 'assistant', content: response.content });
 
-            const toolResults: Anthropic.ToolResultBlockParam[] = [];
-            for (const block of response.content) {
-                if (block.type === 'tool_use') {
-                    const resultData = await handleToolCall(block.name, block.input, { nodes, tasks });
-                    toolResults.push({
-                        type: 'tool_result',
-                        tool_use_id: block.id,
-                        content: JSON.stringify(resultData),
-                    });
+                const toolResults: Anthropic.ToolResultBlockParam[] = [];
+                for (const block of response.content) {
+                    if (block.type === 'tool_use') {
+                        const resultData = await handleToolCall(block.name, block.input, { nodes, tasks });
+                        toolResults.push({
+                            type: 'tool_result',
+                            tool_use_id: block.id,
+                            content: JSON.stringify(resultData),
+                        });
+                    }
                 }
+                messages.push({ role: 'user', content: toolResults });
+            } else {
+                // Final response text
+                const textBlock = response.content.find((b) => b.type === 'text');
+                const rawText = textBlock?.type === 'text' ? textBlock.text : '';
+                recordRun(response.stop_reason === 'refusal' ? 'REFUSED' : 'SUCCESS', { resultText: rawText });
+
+                try {
+                    // Parse structured JSON finding
+                    const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+                    if (jsonMatch) return JSON.parse(jsonMatch[0]);
+                } catch { }
+
+                return {
+                    facts: ['Investigation completed with unstructured output.'],
+                    hypothesis: rawText,
+                    recommendedAction: 'Review node status manually.',
+                    unknowns: [],
+                };
             }
-            messages.push({ role: 'user', content: toolResults });
-        } else {
-            // Final response text
-            const textBlock = response.content.find((b) => b.type === 'text');
-            const rawText = textBlock ? textBlock.text : '';
-
-            try {
-                // Parse structured JSON finding
-                const jsonMatch = rawText.match(/\{[\s\S]*\}/);
-                if (jsonMatch) return JSON.parse(jsonMatch[0]);
-            } catch { }
-
-            return {
-                facts: ['Investigation completed with unstructured output.'],
-                hypothesis: rawText,
-                recommendedAction: 'Review node status manually.',
-                unknowns: [],
-            };
         }
+    } catch (err) {
+        recordRun('FAILED', { error: String(err) });
+        throw err;
     }
 
+    recordRun('FAILED', { error: 'Exceeded maximum tool turns' });
     throw new Error('Investigation loop exceeded maximum tool turn limit.');
 }
