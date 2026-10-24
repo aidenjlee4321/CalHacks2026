@@ -33,6 +33,12 @@ import {
   type SubscriptionHandleImpl as __SubscriptionHandleImpl,
 } from "spacetimedb";
 
+import AssignTaskReducer from "./assign_task_reducer";
+import CompleteTaskReducer from "./complete_task_reducer";
+import LogActivityReducer from "./log_activity_reducer";
+import RequestHelpReducer from "./request_help_reducer";
+import ResetDemoReducer from "./reset_demo_reducer";
+import ResolveHandoffReducer from "./resolve_handoff_reducer";
 // Import all reducer arg schemas
 import AddNodeReducer from "./add_node_reducer";
 import UpdateStatusReducer from "./update_status_reducer";
