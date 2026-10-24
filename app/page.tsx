@@ -1,18 +1,24 @@
 import TopologyMap from '../components/TopologyMap';
 import { initialOrgData } from '../lib/store';
+import Link from 'next/link';
+
 export default function Home() {
   return (
     <div className="min-h-screen flex flex-col bg-gray-50 text-gray-900">
       {/* Header */}
       <header className="w-full bg-white border-b border-gray-200 p-6 shadow-sm z-10 flex flex-col items-center">
         <div className="w-full flex justify-between items-center mb-6">
-          <h1 className="font-bold text-xl tracking-tight">Hybrid Org-Chart</h1>
-          <div className="text-sm font-medium bg-blue-100 text-blue-800 px-3 py-1 rounded-full">
-            Status: Live Demo
+          <div className="flex items-center gap-4">
+            <h1 className="font-bold text-xl tracking-tight">Hybrid Org-Chart</h1>
+            <div className="text-sm font-medium bg-blue-100 text-blue-800 px-3 py-1 rounded-full">
+              Status: Live Demo
+            </div>
           </div>
+          <Link href="/edit" className="text-sm bg-gray-100 hover:bg-gray-200 border border-gray-300 text-gray-800 px-4 py-2 rounded-md transition shadow-sm">
+            ⚙️ Edit Organization
+          </Link>
         </div>
 
-        {/* The Org Chart Visualization */}
         <div className="w-full overflow-x-auto pb-4">
           <TopologyMap nodes={initialOrgData} rootId="node-1" />
         </div>
