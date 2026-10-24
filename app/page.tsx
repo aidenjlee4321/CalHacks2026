@@ -4,7 +4,6 @@ export default function Home() {
   return (
     <div className="min-h-screen flex flex-col bg-gray-50 text-gray-900">
       {/* Header */}
-      // Inside your Home component return:
       <header className="w-full bg-white border-b border-gray-200 p-6 shadow-sm z-10 flex flex-col items-center">
         <div className="w-full flex justify-between items-center mb-6">
           <h1 className="font-bold text-xl tracking-tight">Hybrid Org-Chart</h1>
