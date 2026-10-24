@@ -17,6 +17,8 @@ function parseList(json: string): string[] {
 export default function LiveOrgChart() {
   const [nodeRows, nodesReady] = useTable(tables.orgNode);
   const [taskRows] = useTable(tables.task);
+  const [handoffRows] = useTable(tables.handoff);
+  const waitingOn = handoffRows.filter((h) => h.status === 'OPEN').map((h) => h.assignedToId);
 
   if (!nodesReady) {
     return <p className="text-sm text-gray-500">Connecting to SpacetimeDB…</p>;
@@ -44,5 +46,5 @@ export default function LiveOrgChart() {
     return <p className="text-sm text-gray-500">No org yet. Run reset_demo.</p>;
   }
 
-  return <TopologyMap nodes={nodes} rootId={root.id} />;
+  return <TopologyMap nodes={nodes} rootId={root.id} highlightIds={waitingOn}/>;
 }

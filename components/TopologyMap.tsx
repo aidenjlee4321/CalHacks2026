@@ -3,6 +3,7 @@ import { OrgNode } from '../lib/store';
 interface Props {
     nodes: Record<string, OrgNode>;
     rootId: string;
+    highlightIds?: string[]; // humans who must answer a request right now
 }
 
 // How each status looks
@@ -24,19 +25,23 @@ const STATUS = {
     },
 };
 
-export default function TopologyMap({ nodes, rootId }: Props) {
+export default function TopologyMap({ nodes, rootId, highlightIds = [] }: Props) {
     const node = nodes[rootId];
     if (!node) return null;
 
     const isAgent = node.type === 'AGENT';
     const style = STATUS[node.status];
-    // The first task that isn't finished yet
     const currentTask = node.tasks.find((t) => t.status !== 'COMPLETED');
+    const mustDecide = highlightIds.includes(node.id);
 
     return (
         <div className="flex flex-col items-center">
             {/* The Node Card */}
-            <div className={`w-56 rounded-xl border-2 p-3 text-left transition-all duration-300 ${style.card}`}>
+            <div
+                className={`w-56 rounded-xl border-2 p-3 text-left transition-all duration-500 ${
+                    mustDecide ? 'border-amber-400 bg-amber-50 ring-4 ring-amber-300 shadow-lg scale-105' : style.card
+                }`}
+            >
                 {/* Top row: type + status */}
                 <div className="flex items-center justify-between">
                     <span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">
@@ -56,10 +61,17 @@ export default function TopologyMap({ nodes, rootId }: Props) {
                     {currentTask ? currentTask.description : 'No active task'}
                 </div>
 
-                {/* Big warning when blocked */}
+                {/* Agent is paused */}
                 {node.status === 'BLOCKED_BY_HUMAN' && (
                     <div className="mt-2 rounded-md bg-red-600 px-2 py-1 text-center text-[11px] font-semibold text-white">
                         ⏸ Paused — waiting for a human
+                    </div>
+                )}
+
+                {/* Human must answer */}
+                {mustDecide && (
+                    <div className="mt-2 animate-pulse rounded-md bg-amber-500 px-2 py-1 text-center text-[11px] font-semibold text-white">
+                        📥 Your decision is needed
                     </div>
                 )}
 
@@ -76,7 +88,7 @@ export default function TopologyMap({ nodes, rootId }: Props) {
                     <div className="relative flex gap-6 border-t border-gray-300 pt-4">
                         {node.subordinates.map((subId) => (
                             <div key={subId} className="relative">
-                                <TopologyMap nodes={nodes} rootId={subId} />
+                                <TopologyMap nodes={nodes} rootId={subId} highlightIds={highlightIds} />
                             </div>
                         ))}
                     </div>
