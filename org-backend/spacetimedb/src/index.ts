@@ -68,7 +68,7 @@ const spacetimedb = schema({ task, orgNode, handoff, activity, escalationTimer }
 
 // ---------- helpers (not exported) ----------
 type Ctx = ReducerCtx<InferSchema<typeof spacetimedb>>;
-const ESCALATE_AFTER_MICROS = 60_000_000n; // 60 seconds
+const ESCALATE_AFTER_MICROS = 15_000_000n; // 60 seconds
 
 function managerOf(ctx: Ctx, nodeId: string): string {
   const node = ctx.db.orgNode.id.find(nodeId);
@@ -185,7 +185,7 @@ export const escalate = spacetimedb.reducer(
     const nextId = managerOf(ctx, h.assignedToId);
     if (!nextId) return; // already at the top
     ctx.db.handoff.id.update({ ...h, assignedToId: nextId });
-    log(ctx, nextId, 'SYSTEM', `Escalated from ${h.assignedToId}: no answer in 60s`);
+    log(ctx, nextId, 'SYSTEM', `Escalated from ${h.assignedToId}: no answer in 15s`);
     scheduleEscalation(ctx, h.id);
   }
 );
