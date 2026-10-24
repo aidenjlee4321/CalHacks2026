@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { anthropic, AGENT_MODEL, SUPPORTS_FALLBACKS, summarizeUsage } from '@/lib/claude';
 import { getAgentModel } from '@/lib/agentModels';
 import { recordTelemetry } from '@/lib/telemetryStore';
+import { logClaudeError, logClaudeRequest, logClaudeResponse } from '@/lib/logClaudeCall';
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -31,6 +32,9 @@ export async function POST(req: Request) {
 
     // Each agent runs on its own assigned model
     const model = getAgentModel(agentId, AGENT_MODEL);
+    const actor = { actorId: base.agentId, actorName: base.agentName };
+    const taskText = prompt || 'Execute the assigned task efficiently.';
+    const requestId = logClaudeRequest(actor, model, `Task (${source}): ${taskText}`);
 
     try {
         // 2. Run the task. Server-side fallbacks retry a declined request on another model.
@@ -43,7 +47,7 @@ export async function POST(req: Request) {
             }),
             system: `You are ${agentName || 'an AI agent'}, an AI agent working inside a company org chart alongside human employees. Complete the assigned task and reply with a concise work report.`,
             messages: [
-                { role: 'user', content: prompt || 'Execute the assigned task efficiently.' },
+                { role: 'user', content: taskText },
             ],
         });
 
@@ -52,6 +56,13 @@ export async function POST(req: Request) {
         const resultText = textBlock?.type === 'text' ? textBlock.text : 'No response generated.';
         const usage = summarizeUsage(response.model, response.usage);
         const refused = response.stop_reason === 'refusal';
+        logClaudeResponse(actor, requestId, {
+            model: response.model,
+            usage,
+            latencyMs,
+            stopReason: response.stop_reason,
+            summary: resultText,
+        });
 
         // 3. Record run telemetry
         recordTelemetry({
@@ -82,6 +93,7 @@ export async function POST(req: Request) {
         });
     } catch (error) {
         console.error('Claude API Error:', error);
+        logClaudeError(actor, requestId, model, Date.now() - startTime, error);
         recordTelemetry({
             ...base,
             model,

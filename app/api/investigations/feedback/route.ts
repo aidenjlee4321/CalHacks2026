@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { addLesson } from '@/lib/investigator/lessons';
+import { logActivity } from '@/lib/activityLog';
 
 export async function POST(req: Request) {
     try {
@@ -17,6 +18,14 @@ export async function POST(req: Request) {
             triggerPattern: triggerPattern || 'General Correction',
             correction: correction.trim(),
             approved: true, // Auto-approve human feedback
+        });
+
+        logActivity({
+            kind: 'HUMAN',
+            level: 'info',
+            actorId: nodeId,
+            title: 'Human correction saved as a lesson',
+            detail: lesson.correction,
         });
 
         return NextResponse.json({ success: true, lesson });

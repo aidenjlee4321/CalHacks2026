@@ -138,7 +138,7 @@ function StatusLabel({ status }: { status?: string }) {
 // 1. TOKENS PER RUN (stacked columns, oldest → newest)
 // ============================================================================
 
-export function TokensPerRunChart({ runs }: { runs: TelemetryRecord[] }) {
+export function TokensPerRunChart({ runs, onSelect }: { runs: TelemetryRecord[]; onSelect?: (run: TelemetryRecord) => void }) {
     const [ref, width] = useWidth<HTMLDivElement>();
     const [hover, setHover] = useState<number | null>(null);
 
@@ -207,6 +207,8 @@ export function TokensPerRunChart({ runs }: { runs: TelemetryRecord[] }) {
                                     height={plotH}
                                     fill="transparent"
                                     tabIndex={0}
+                                    style={onSelect ? { cursor: 'pointer' } : undefined}
+                                    onClick={() => onSelect?.(r)}
                                     onMouseEnter={() => setHover(i)}
                                     onFocus={() => setHover(i)}
                                     onBlur={() => setHover(null)}
@@ -347,11 +349,19 @@ export function CumulativeCostChart({ runs }: { runs: TelemetryRecord[] }) {
 // 3. USAGE BREAKDOWN (horizontal stacked bars, top 8 + Other)
 // ============================================================================
 
-export function TokensByAgentChart({ runs }: { runs: TelemetryRecord[] }) {
-    return <UsageBreakdownChart rows={[...usageByAgent(runs).values()]} label="Tokens used per agent" />;
+export function TokensByAgentChart({ runs, onSelect }: { runs: TelemetryRecord[]; onSelect?: (row: UsageRow) => void }) {
+    return <UsageBreakdownChart rows={[...usageByAgent(runs).values()]} label="Tokens used per agent" onSelect={onSelect} />;
 }
 
-export function UsageBreakdownChart({ rows: allRows, label }: { rows: UsageRow[]; label: string }) {
+export function UsageBreakdownChart({
+    rows: allRows,
+    label,
+    onSelect,
+}: {
+    rows: UsageRow[];
+    label: string;
+    onSelect?: (row: UsageRow) => void;
+}) {
     const [ref, width] = useWidth<HTMLDivElement>();
     const [hover, setHover] = useState<number | null>(null);
 
@@ -414,6 +424,8 @@ export function UsageBreakdownChart({ rows: allRows, label }: { rows: UsageRow[]
                                     height={rowH}
                                     fill="transparent"
                                     tabIndex={0}
+                                    style={onSelect && r.key !== 'other' ? { cursor: 'pointer' } : undefined}
+                                    onClick={() => r.key !== 'other' && onSelect?.(r)}
                                     onMouseEnter={() => setHover(i)}
                                     onFocus={() => setHover(i)}
                                     onBlur={() => setHover(null)}

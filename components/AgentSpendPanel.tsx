@@ -60,7 +60,7 @@ export default function AgentSpendPanel({
             await fetch('/api/agent/model', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ agentId: node.id, model }),
+                body: JSON.stringify({ agentId: node.id, agentName: node.name, model }),
             });
             onModelChange();
         } finally {

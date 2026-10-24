@@ -6,6 +6,9 @@ import { useOrgData, OrgNode, TaskItem } from '@/hooks/useOrgData';
 import { useTelemetry } from '@/hooks/useTelemetry';
 import { UsageRow, UsageTotals, ownedAgents, sumTotals, teamAgentIds, usageByAgent } from '@/lib/agentUsage';
 import AgentSpendPanel from '@/components/AgentSpendPanel';
+import ActivityFeed from '@/components/ActivityFeed';
+import { useActivity } from '@/hooks/useActivity';
+import type { ActivityEvent } from '@/lib/activityLog';
 import { formatCompact, formatUsd } from '@/components/UsageCharts';
 
 // ============================================================================
@@ -296,7 +299,7 @@ function SidebarHeader({ isConnected, identity }: { isConnected: boolean; identi
             href="/meta-analysis"
             className="flex-1 items-center justify-center text-center text-xs font-medium px-2.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition-all"
           >
-            📊 Meta Analysis
+            📊 Analytics
           </Link>
         </div>
       </header>
@@ -674,6 +677,7 @@ function NodeInspector({
   defaultModel,
   agentModels,
   onModelChange,
+  activityEvents,
 }: {
   selectedNode: OrgNode;
   nodes: OrgNode[];
@@ -682,6 +686,7 @@ function NodeInspector({
   defaultModel: string | null;
   agentModels: Record<string, string>;
   onModelChange: () => void;
+  activityEvents: ActivityEvent[];
   runningTaskId?: string | null;
   agentResult?: string | null;
   onClose: () => void;
@@ -836,6 +841,25 @@ function NodeInspector({
             agentModels={agentModels}
             onModelChange={onModelChange}
           />
+
+          {/* Recent activity for this node (and the agents a person owns) */}
+          <div className="border-t border-slate-800 pt-4 space-y-2">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">Recent Activity</h3>
+              <Link href="/meta-analysis" className="text-[10px] text-indigo-400 hover:text-indigo-300">
+                All activity →
+              </Link>
+            </div>
+            <div className="max-h-72 flex flex-col rounded-lg bg-slate-950 border border-slate-800 overflow-hidden">
+              <ActivityFeed
+                events={activityEvents}
+                actorIds={new Set([selectedNode.id, ...ownedAgents(selectedNode.id, nodes).map((a) => a.id)])}
+                compact
+                limit={8}
+                emptyText="No activity for this node yet."
+              />
+            </div>
+          </div>
 
           {/* Investigator Action & Findings Panel */}
           <div className="border-t border-slate-800 pt-4 space-y-3">
@@ -1074,6 +1098,7 @@ export default function Page() {
 
   // Agent token/cost spend per person: their own agents, and every agent in their team
   const { records: telemetry, defaultModel, agentModels, refresh: refreshTelemetry } = useTelemetry();
+  const { events: activityEvents } = useActivity(3000);
   const agentUsage = useMemo(() => usageByAgent(telemetry), [telemetry]);
   const spendByPerson = useMemo(() => {
     const spend = new Map<string, { own: UsageTotals; team: UsageTotals }>();
@@ -1344,6 +1369,7 @@ export default function Page() {
           defaultModel={defaultModel}
           agentModels={agentModels}
           onModelChange={refreshTelemetry}
+          activityEvents={activityEvents}
         />
       )}
     </div>

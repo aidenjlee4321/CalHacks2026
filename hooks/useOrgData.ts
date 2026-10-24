@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useContext, createContext } from 'react';
+import { reportActivity } from '@/lib/reportActivity';
 
 // Types
 export interface TaskItem {
@@ -149,11 +150,15 @@ export function useOrgData() {
         updateTasks();
     }, [spacetime.conn, demoNodes, demoTasks]);
 
+    // Every org and task change is also reported to the shared activity log
+    const nameOf = (id?: string) => (id ? demoNodes.find((n) => n.id === id)?.name ?? id : 'nobody');
+
     const addNode = (name: string, type: string, superiorId: string) => {
         const newId = crypto.randomUUID();
         const finalName = name.trim() || 'New Member';
         const newNode: OrgNode = { id: newId, name: finalName, type, status: 'Idle', superior: superiorId || undefined };
         setDemoNodes((prev) => [...prev, newNode]);
+        reportActivity({ kind: 'ORG', level: 'info', actorId: newId, actorName: finalName, title: `${type} added under ${nameOf(superiorId)}` });
         return newId;
     };
 
@@ -161,23 +166,41 @@ export function useOrgData() {
         setDemoNodes((prev) =>
             prev.map((n) => (n.id === id ? { ...n, name: name.trim() || 'Unnamed Node', type, superior: superiorId || undefined } : n))
         );
+        reportActivity({ kind: 'ORG', level: 'info', actorId: id, actorName: name.trim() || nameOf(id), title: `Updated (${type}, reports to ${nameOf(superiorId)})` });
     };
 
     const deleteNode = (id: string) => {
         setDemoNodes((prev) => prev.filter((n) => n.id !== id));
+        reportActivity({ kind: 'ORG', level: 'warning', actorId: id, actorName: nameOf(id), title: 'Removed from the org' });
     };
 
     const addTask = (nodeId: string, title: string) => {
         const newTask: TaskItem = { id: crypto.randomUUID(), assignedNodeId: nodeId, title, completed: false };
         setDemoTasks((prev) => [...prev, newTask]);
+        reportActivity({ kind: 'TASK', level: 'info', actorId: nodeId, actorName: nameOf(nodeId), title: 'Task assigned', detail: title });
     };
 
     const deleteTask = (taskId: string) => {
+        const task = demoTasks.find((t) => t.id === taskId);
         setDemoTasks((prev) => prev.filter((t) => t.id !== taskId));
+        if (task) {
+            reportActivity({ kind: 'TASK', level: 'info', actorId: task.assignedNodeId, actorName: nameOf(task.assignedNodeId), title: 'Task deleted', detail: task.title });
+        }
     };
 
     const toggleTask = (taskId: string) => {
+        const task = demoTasks.find((t) => t.id === taskId);
         setDemoTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, completed: !t.completed } : t)));
+        if (task) {
+            reportActivity({
+                kind: 'TASK',
+                level: task.completed ? 'info' : 'success',
+                actorId: task.assignedNodeId,
+                actorName: nameOf(task.assignedNodeId),
+                title: task.completed ? 'Task reopened' : 'Task completed',
+                detail: task.title,
+            });
+        }
     };
 
     const updateNodeStatus = (id: string, status: string) => {
