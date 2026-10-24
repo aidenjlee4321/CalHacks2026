@@ -5,41 +5,76 @@ interface Props {
     rootId: string;
 }
 
+// How each status looks
+const STATUS = {
+    IDLE: {
+        card: 'border-gray-200 bg-white',
+        dot: 'bg-gray-400',
+        label: 'Idle',
+    },
+    WORKING: {
+        card: 'border-blue-300 bg-blue-50',
+        dot: 'bg-blue-500 animate-pulse',
+        label: 'Working',
+    },
+    BLOCKED_BY_HUMAN: {
+        card: 'border-red-400 bg-red-50 ring-4 ring-red-200 shadow-lg shadow-red-100',
+        dot: 'bg-red-500 animate-pulse',
+        label: 'Needs human',
+    },
+};
+
 export default function TopologyMap({ nodes, rootId }: Props) {
     const node = nodes[rootId];
     if (!node) return null;
 
     const isAgent = node.type === 'AGENT';
-
-    // Dynamic styling based on status
-    const statusColors = {
-        IDLE: 'bg-gray-100 text-gray-500 border-gray-300',
-        WORKING: 'bg-blue-50 text-blue-700 border-blue-400 animate-pulse',
-        BLOCKED_BY_HUMAN: 'bg-red-50 text-red-700 border-red-500',
-    };
+    const style = STATUS[node.status];
+    // The first task that isn't finished yet
+    const currentTask = node.tasks.find((t) => t.status !== 'COMPLETED');
 
     return (
         <div className="flex flex-col items-center">
             {/* The Node Card */}
-            <div className={`w-48 p-3 border-2 rounded-lg text-center shadow-sm ${statusColors[node.status]}`}>
-                <div className="text-xs font-bold uppercase tracking-wider mb-1">
-                    {isAgent ? '🤖 Agent' : '👤 Human'}
+            <div className={`w-56 rounded-xl border-2 p-3 text-left transition-all duration-300 ${style.card}`}>
+                {/* Top row: type + status */}
+                <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">
+                        {isAgent ? '🤖 Agent' : '👤 Human'}
+                    </span>
+                    <span className="flex items-center gap-1.5 text-[11px] font-medium text-gray-700">
+                        <span className={`h-2 w-2 rounded-full ${style.dot}`} />
+                        {style.label}
+                    </span>
                 </div>
-                <div className="font-semibold text-gray-900 truncate">{node.name}</div>
-                <div className="text-xs mt-2 font-mono">
+
+                {/* Name */}
+                <div className="mt-1 truncate font-semibold text-gray-900">{node.name}</div>
+
+                {/* Current task */}
+                <div className="mt-2 min-h-[2rem] text-xs text-gray-600 line-clamp-2">
+                    {currentTask ? currentTask.description : 'No active task'}
+                </div>
+
+                {/* Big warning when blocked */}
+                {node.status === 'BLOCKED_BY_HUMAN' && (
+                    <div className="mt-2 rounded-md bg-red-600 px-2 py-1 text-center text-[11px] font-semibold text-white">
+                        ⏸ Paused — waiting for a human
+                    </div>
+                )}
+
+                {/* Task count */}
+                <div className="mt-2 font-mono text-[11px] text-gray-400">
                     Tasks: {node.tasks.length}
                 </div>
             </div>
 
-            {/* Render Subordinates Recursively */}
+            {/* Draw the people/agents under this one */}
             {node.subordinates.length > 0 && (
                 <>
-                    <div className="w-px h-6 bg-gray-300"></div>
-                    <div className="flex space-x-6 border-t border-gray-300 pt-4 relative">
-                        {/* Invisible line to cover the top borders nicely */}
-                        <div className="absolute top-0 left-1/2 w-px h-4 bg-gray-300 -translate-x-1/2 -translate-y-full"></div>
-
-                        {node.subordinates.map(subId => (
+                    <div className="h-6 w-px bg-gray-300"></div>
+                    <div className="relative flex gap-6 border-t border-gray-300 pt-4">
+                        {node.subordinates.map((subId) => (
                             <div key={subId} className="relative">
                                 <TopologyMap nodes={nodes} rootId={subId} />
                             </div>
