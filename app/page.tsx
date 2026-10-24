@@ -697,7 +697,17 @@ function NodeInspector({
   const [investigating, setInvestigating] = useState(false);
   const [finding, setFinding] = useState<any>(null);
 
+  // Feedback form state
+  const [correctionText, setCorrectionText] = useState('');
+  const [isSubmittingFeedback, setIsSubmittingFeedback] = useState(false);
+  const [feedbackSuccess, setFeedbackSuccess] = useState(false);
+
   const handleRunInvestigation = async () => {
+    if (!selectedNode || !selectedNode.id) {
+      console.error('Cannot run investigation: selectedNode is null or missing an id', selectedNode);
+      return;
+    }
+
     setInvestigating(true);
     setFinding(null);
 
@@ -705,25 +715,63 @@ function NodeInspector({
       const res = await fetch('/api/investigations', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ targetNode: selectedNode, nodes, tasks }),
+        body: JSON.stringify({
+          targetNode: selectedNode,
+          nodes: nodes || [],
+          tasks: tasks || [],
+        }),
       });
 
-      // 1. Check if the HTTP response status is OK (200-299)
       if (!res.ok) {
-        const errorText = await res.text(); // Read HTML or raw text safely
+        const errorText = await res.text();
         console.error(`Server error (${res.status}):`, errorText);
         return;
       }
 
-      // 2. Safe to parse JSON only after confirming res.ok
       const data = await res.json();
       if (data.success) {
         setFinding(data.finding);
       }
     } catch (err) {
-      console.error('Fetch error:', err);
+      console.error('Investigation execution error:', err);
     } finally {
       setInvestigating(false);
+    }
+  };
+
+  const handleSendFeedback = async () => {
+    if (!correctionText.trim()) return;
+    setIsSubmittingFeedback(true);
+
+    try {
+      const res = await fetch('/api/investigations/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          nodeId: selectedNode.id,
+          triggerPattern: finding?.hypothesis || 'General Correction',
+          correction: correctionText,
+        }),
+      });
+
+      // 1. Guard against non-JSON error pages (404/500)
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error(`Feedback server error (${res.status}):`, errorText);
+        return;
+      }
+
+      // 2. Safe to parse JSON
+      const data = await res.json();
+      if (data.success) {
+        setFeedbackSuccess(true);
+        setCorrectionText('');
+        setTimeout(() => setFeedbackSuccess(false), 3000);
+      }
+    } catch (err) {
+      console.error('Feedback execution error:', err);
+    } finally {
+      setIsSubmittingFeedback(false);
     }
   };
 
@@ -744,10 +792,10 @@ function NodeInspector({
           <div className="p-4 bg-slate-950 rounded-xl border border-slate-800">
             <span
               className={`text-xs font-bold uppercase px-2 py-0.5 rounded border inline-block mb-1 ${selectedNode.type === 'Lead'
-                ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
-                : selectedNode.type === 'Worker'
-                  ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/30'
-                  : 'bg-purple-500/10 text-purple-400 border-purple-500/30'
+                  ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                  : selectedNode.type === 'Worker'
+                    ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/30'
+                    : 'bg-purple-500/10 text-purple-400 border-purple-500/30'
                 }`}
             >
               {selectedNode.type}
@@ -800,29 +848,74 @@ function NodeInspector({
             </button>
 
             {finding && (
-              <div className="p-3 bg-purple-950/40 border border-purple-800/50 rounded-lg space-y-2 text-xs">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-purple-400 block">
-                  Diagnosis & Hypothesis
-                </span>
-                <p className="text-slate-200 leading-relaxed">{finding.hypothesis}</p>
+              <div className="p-3 bg-purple-950/40 border border-purple-800/50 rounded-lg space-y-3 text-xs">
+                {/* Diagnosis */}
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-purple-400 block mb-1">
+                    Diagnosis & Hypothesis
+                  </span>
+                  <p className="text-slate-200 leading-relaxed bg-slate-950/50 p-2 rounded border border-purple-900/40">
+                    {finding.hypothesis}
+                  </p>
+                </div>
 
+                {/* Key Facts */}
                 {finding.facts && finding.facts.length > 0 && (
                   <div>
                     <span className="text-[10px] font-bold uppercase tracking-wider text-purple-400 block mb-1">
                       Key Facts
                     </span>
-                    <ul className="list-disc list-inside space-y-0.5 text-[11px] text-slate-300">
+                    <ul className="list-disc list-inside space-y-1 text-[11px] text-slate-300">
                       {finding.facts.map((fact: string, idx: number) => (
-                        <li key={idx}>{fact}</li>
+                        <li key={idx} className="leading-snug">{fact}</li>
                       ))}
                     </ul>
                   </div>
                 )}
 
-                <span className="text-[10px] font-bold uppercase tracking-wider text-purple-400 block pt-1">
-                  Recommended Action
-                </span>
-                <p className="text-amber-300 font-medium">{finding.recommendedAction}</p>
+                {/* Recommended Actions */}
+                {finding.recommendedActions && finding.recommendedActions.length > 0 && (
+                  <div>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400 block mb-1">
+                      Recommended Actions
+                    </span>
+                    <ul className="space-y-1 text-[11px] text-amber-200 font-medium">
+                      {finding.recommendedActions.map((action: string, idx: number) => (
+                        <li key={idx} className="flex items-start gap-1.5 bg-amber-950/30 p-1.5 rounded border border-amber-800/30">
+                          <span className="text-amber-400 shrink-0">▸</span>
+                          <span>{action}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Correct Assumption Form */}
+                <div className="pt-2 border-t border-purple-800/40 space-y-2">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-400 block">
+                    ✏️ Correct This Assumption
+                  </span>
+                  <input
+                    type="text"
+                    value={correctionText}
+                    onChange={(e) => setCorrectionText(e.target.value)}
+                    placeholder="e.g. Node-1 runs batch jobs without logging events"
+                    className="w-full px-2.5 py-1.5 bg-slate-950 border border-purple-900/60 rounded text-xs text-slate-200 focus:outline-none focus:border-indigo-500 placeholder-slate-600"
+                  />
+                  <button
+                    onClick={handleSendFeedback}
+                    disabled={isSubmittingFeedback || !correctionText.trim()}
+                    className="w-full py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white font-medium text-[11px] rounded transition-colors"
+                  >
+                    {isSubmittingFeedback ? 'Saving Lesson...' : 'Save Lesson & Re-train'}
+                  </button>
+
+                  {feedbackSuccess && (
+                    <p className="text-[10px] text-emerald-400 font-medium text-center">
+                      ✓ Lesson saved! Re-run investigation to see adaptation.
+                    </p>
+                  )}
+                </div>
               </div>
             )}
           </div>
@@ -881,6 +974,36 @@ export default function Page() {
   } = useCanvasPanZoom(() => setSelectedNodeId(null));
 
   const containerRef = useRef<HTMLDivElement>(null);
+  
+  const [alerts, setAlerts] = useState<any[]>([]);
+  const [isScanning, setIsScanning] = useState(false);
+
+  const handleRunOrgScan = async () => {
+    setIsScanning(true);
+    try {
+      const res = await fetch('/api/investigations/scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nodes, tasks }),
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.success) {
+        setAlerts(data.alerts);
+      }
+    } catch (err) {
+      console.error('Scan error:', err);
+    } finally {
+      setIsScanning(false);
+    }
+  };
+
+  // Run initial scan whenever node data changes
+  useEffect(() => {
+    if (nodes.length > 0) {
+      handleRunOrgScan();
+    }
+  }, [nodes.length, tasks.length]);
 
   const handleExecuteTaskWithAgent = async (
     agentNode: OrgNode,
@@ -969,7 +1092,38 @@ export default function Page() {
       <aside className="w-80 border-r border-slate-800 bg-slate-900/90 backdrop-blur flex flex-col z-20 shadow-2xl">
         <SidebarHeader isConnected={isConnected} identity={identity} />
         <MetricsBar nodes={nodes} tasks={tasks} />
-
+        {alerts.length > 0 && (
+          <div className="p-3 bg-rose-950/40 border-b border-rose-800/50 space-y-1.5">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-rose-400 flex items-center gap-1">
+                <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
+                Autonomous Alerts ({alerts.length})
+              </span>
+              <button
+                onClick={handleRunOrgScan}
+                disabled={isScanning}
+                className="text-[10px] text-slate-400 hover:text-white underline"
+              >
+                {isScanning ? 'Scanning...' : 'Rescan'}
+              </button>
+            </div>
+            <div className="space-y-1 max-h-32 overflow-y-auto">
+              {alerts.map((alert) => (
+                <div
+                  key={alert.id}
+                  onClick={() => setSelectedNodeId(alert.nodeId)}
+                  className="p-1.5 bg-slate-950/80 rounded border border-rose-900/50 cursor-pointer hover:border-rose-500 transition-colors text-xs"
+                >
+                  <div className="flex items-center justify-between text-[10px]">
+                    <span className="font-semibold text-rose-300">{alert.title}</span>
+                    <span className="font-mono text-slate-500">{alert.nodeName}</span>
+                  </div>
+                  <p className="text-[10px] text-slate-400 mt-0.5 truncate">{alert.description}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         <div className="flex-1 overflow-y-auto p-4 space-y-6">
           <div className="space-y-3">
             <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400">
