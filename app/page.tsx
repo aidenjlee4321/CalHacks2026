@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo, useRef, useCallback, createContext, useContext } from 'react';
+import React, { useState, useEffect, useMemo, useRef, createContext, useContext } from 'react';
 
 // ============================================================================
 // 1. TYPES & DATA MODELS
@@ -16,15 +16,21 @@ export interface TaskItem {
 export interface OrgNode {
   id: string;
   name: string;
-  type: string; // 'Worker' | 'Agent'
+  type: 'Lead' | 'Worker' | 'Agent' | string;
   status?: string;
   superior?: string;
   reportsToJson?: string;
   subordinatesJson?: string;
 }
 
-export interface ExtendedNode extends OrgNode {
-  childrenNodes: ExtendedNode[];
+export interface WorkerWithAgents extends OrgNode {
+  assignedAgents: OrgNode[];
+}
+
+export interface ExtendedLeadNode extends OrgNode {
+  childrenNodes: ExtendedLeadNode[]; // Child Leads in upper tree
+  teamWorkers: WorkerWithAgents[];  // Subordinate Workers in rows
+  assignedAgents: OrgNode[];        // Direct Agents assigned to Lead
   level: number;
   x: number;
   y: number;
@@ -45,7 +51,7 @@ interface SpacetimeContextType {
 }
 
 // ============================================================================
-// 2. FALLBACK CONTEXT & INITIAL DEMO DATA
+// 2. FALLBACK CONTEXT & INITIAL DEMO DATA (100 NODES)
 // ============================================================================
 
 const SpacetimeContext = createContext<SpacetimeContextType>({
@@ -74,24 +80,84 @@ function useSpacetimeHook(): SpacetimeContextType {
   return useContext(SpacetimeContext);
 }
 
-const INITIAL_NODES: OrgNode[] = [
-  { id: 'root-1', name: 'Sarah Connor', type: 'Worker', status: 'Active' },
-  { id: 'tech-lead', name: 'Alex Rivera', type: 'Worker', status: 'Active', superior: 'root-1' },
-  { id: 'ops-lead', name: 'Marcus Vance', type: 'Worker', status: 'Idle', superior: 'root-1' },
-  { id: 'dev-1', name: 'Agent 1 (GPT)', type: 'Agent', status: 'Idle', superior: 'tech-lead' },
-  { id: 'dev-2', name: 'Agent 2 (Claude)', type: 'Agent', status: 'Working', superior: 'tech-lead' },
-];
+// Generate 100 Nodes adhering strictly to the Lead/Worker/Agent hierarchy policies
+const createBaseDataset = () => {
+  const statuses = ['Active', 'Idle', 'Busy', 'Offline'];
+  const taskTemplates = [
+    'Audit workspace security permissions',
+    'Process neural network weight batch',
+    'Optimize database index performance',
+    'Execute automated regression suite',
+    'Review architecture design proposal',
+    'Deploy edge microservice cluster',
+    'Sync real-time telemetry vector cache',
+    'Monitor system memory allocation',
+    'Rebalance microservice load',
+    'Verify WebSocket connection guards'
+  ];
 
-const INITIAL_TASKS: TaskItem[] = [
-  { id: 't-1', assignedNodeId: 'root-1', title: 'Review Q3 Org Budget & Allocations', completed: false },
-  { id: 't-2', assignedNodeId: 'tech-lead', title: 'Approve SpacetimeDB Migration Plan', completed: true },
-  { id: 't-3', assignedNodeId: 'tech-lead', title: 'Conduct Q3 Engineering 1-on-1s', completed: false },
-  { id: 't-4', assignedNodeId: 'dev-1', title: 'Implement WebSocket reconnect guard', completed: true },
-  { id: 't-5', assignedNodeId: 'dev-2', title: 'Optimize canvas pan & zoom performance', completed: false },
-  { id: 't-6', assignedNodeId: 'ops-lead', title: 'Audit workspace infrastructure access', completed: false },
-];
+  const nodes: OrgNode[] = [
+    { id: 'node-1', name: 'Executive Lead #001', type: 'Lead', status: 'Active' },
+    { id: 'node-2', name: 'Engineering Lead #002', type: 'Lead', status: 'Active', superior: 'node-1' },
+    { id: 'node-3', name: 'Sales Lead #003', type: 'Lead', status: 'Active', superior: 'node-1' },
+    { id: 'node-4', name: 'Operations Lead #004', type: 'Lead', status: 'Busy', superior: 'node-1' },
+    { id: 'node-5', name: 'Product Lead #005', type: 'Lead', status: 'Active', superior: 'node-1' },
+  ];
+
+  const leadIds = ['node-2', 'node-3', 'node-4', 'node-5'];
+
+  // Generate 30 Human Workers (Nodes 6 to 35) assigned to Team Leads
+  for (let i = 6; i <= 35; i++) {
+    const assignedLead = leadIds[(i - 6) % leadIds.length];
+    nodes.push({
+      id: `node-${i}`,
+      name: `Worker #${String(i).padStart(3, '0')}`,
+      type: 'Worker',
+      status: statuses[i % statuses.length],
+      superior: assignedLead,
+    });
+  }
+
+  // Generate 65 Agents (Nodes 36 to 100) assigned to Workers or Leads
+  for (let i = 36; i <= 100; i++) {
+    // Distribute agents: some to Leads (1..5), most to Workers (6..35)
+    const superiorId = i <= 45
+      ? `node-${((i - 36) % 5) + 1}`
+      : `node-${((i - 46) % 30) + 6}`;
+
+    nodes.push({
+      id: `node-${i}`,
+      name: `Agent #${String(i).padStart(3, '0')}`,
+      type: 'Agent',
+      status: statuses[i % statuses.length],
+      superior: superiorId,
+    });
+  }
+
+  // Generate Tasks for all 100 nodes
+  const tasks: TaskItem[] = [];
+  let taskCounter = 1;
+
+  nodes.forEach((node, idx) => {
+    const taskCount = (idx % 2) + 1;
+    for (let t = 0; t < taskCount; t++) {
+      tasks.push({
+        id: `t-${taskCounter}`,
+        assignedNodeId: node.id,
+        title: `${taskTemplates[taskCounter % taskTemplates.length]} [Job #${taskCounter}]`,
+        completed: taskCounter % 3 === 0,
+      });
+      taskCounter++;
+    }
+  });
+
+  return { nodes, tasks };
+};
+
+const { nodes: INITIAL_NODES, tasks: INITIAL_TASKS } = createBaseDataset();
+
 // ============================================================================
-// 3. UTILITY HELPERS
+// 3. UTILITY HELPERS & LAYOUT ENGINE
 // ============================================================================
 
 export function parseSuperior(node: OrgNode): string | null {
@@ -122,41 +188,81 @@ export function getDescendants(startId: string, nodes: OrgNode[]): Set<string> {
   return descendants;
 }
 
-export function calculateTreeLayout(filteredNodes: OrgNode[]) {
+export function calculateLeadTreeLayout(filteredNodes: OrgNode[]) {
   if (filteredNodes.length === 0) return { rootNodes: [], lines: [] };
 
-  const nodeMap = new Map<string, ExtendedNode>();
+  const nodeMap = new Map<string, OrgNode>();
+  filteredNodes.forEach((n) => nodeMap.set(n.id, n));
+
+  // Map Agents to their superior (Lead or Worker)
+  const agentMap = new Map<string, OrgNode[]>();
+  // Map Workers to their superior Lead
+  const workerMap = new Map<string, OrgNode[]>();
+  // Map Lead children to superior Lead
+  const leadChildrenMap = new Map<string, OrgNode[]>();
+
   filteredNodes.forEach((n) => {
-    nodeMap.set(n.id, {
-      ...n,
-      childrenNodes: [],
-      level: 0,
-      x: 0,
-      y: 0,
-    });
-  });
+    const supId = parseSuperior(n);
+    if (!supId) return;
 
-  const rootNodes: ExtendedNode[] = [];
-
-  nodeMap.forEach((node) => {
-    const supId = parseSuperior(node);
-    if (supId && nodeMap.has(supId) && supId !== node.id) {
-      nodeMap.get(supId)!.childrenNodes.push(node);
-    } else {
-      rootNodes.push(node);
+    if (n.type === 'Agent') {
+      if (!agentMap.has(supId)) agentMap.set(supId, []);
+      agentMap.get(supId)!.push(n);
+    } else if (n.type === 'Worker') {
+      if (!workerMap.has(supId)) workerMap.set(supId, []);
+      workerMap.get(supId)!.push(n);
+    } else if (n.type === 'Lead') {
+      if (!leadChildrenMap.has(supId)) leadChildrenMap.set(supId, []);
+      leadChildrenMap.get(supId)!.push(n);
     }
   });
 
-  const NODE_WIDTH = 220;
-  const NODE_HEIGHT = 100;
-  const LEVEL_HEIGHT = 160;
-  const HORIZONTAL_GAP = 50;
+  // Identify Root Leads
+  const rootLeads: OrgNode[] = [];
+  filteredNodes.forEach((n) => {
+    if (n.type === 'Lead') {
+      const supId = parseSuperior(n);
+      if (!supId || !nodeMap.has(supId) || nodeMap.get(supId)?.type !== 'Lead') {
+        rootLeads.push(n);
+      }
+    }
+  });
 
-  let currentX = 50;
+  // Build extended Lead hierarchy
+  const buildExtendedLead = (leadNode: OrgNode, level: number): ExtendedLeadNode => {
+    const childLeadsRaw = leadChildrenMap.get(leadNode.id) || [];
+    const childrenNodes = childLeadsRaw.map((child) => buildExtendedLead(child, level + 1));
 
-  const calculateSubtree = (node: ExtendedNode, level: number): number => {
+    const rawWorkers = workerMap.get(leadNode.id) || [];
+    const teamWorkers: WorkerWithAgents[] = rawWorkers.map((w) => ({
+      ...w,
+      assignedAgents: agentMap.get(w.id) || [],
+    }));
+
+    const assignedAgents = agentMap.get(leadNode.id) || [];
+
+    return {
+      ...leadNode,
+      childrenNodes,
+      teamWorkers,
+      assignedAgents,
+      level,
+      x: 0,
+      y: 0,
+    };
+  };
+
+  const extendedRoots = rootLeads.map((r) => buildExtendedLead(r, 0));
+
+  const NODE_WIDTH = 360;
+  const LEVEL_HEIGHT = 520;
+  const HORIZONTAL_GAP = 80;
+
+  let currentX = 80;
+
+  const calculatePositions = (node: ExtendedLeadNode, level: number): number => {
     node.level = level;
-    node.y = level * LEVEL_HEIGHT + 60;
+    node.y = level * LEVEL_HEIGHT + 80;
 
     if (node.childrenNodes.length === 0) {
       node.x = currentX;
@@ -166,39 +272,25 @@ export function calculateTreeLayout(filteredNodes: OrgNode[]) {
 
     const childrenX: number[] = [];
     node.childrenNodes.forEach((child) => {
-      childrenX.push(calculateSubtree(child, level + 1));
+      childrenX.push(calculatePositions(child, level + 1));
     });
 
     node.x = (childrenX[0] + childrenX[childrenX.length - 1]) / 2;
     return node.x;
   };
 
-  rootNodes.forEach((root) => calculateSubtree(root, 0));
+  extendedRoots.forEach((root) => calculatePositions(root, 0));
 
-  const visited = new Set<string>();
-  const markVisited = (node: ExtendedNode) => {
-    visited.add(node.id);
-    node.childrenNodes.forEach(markVisited);
-  };
-  rootNodes.forEach(markVisited);
-
-  nodeMap.forEach((node) => {
-    if (!visited.has(node.id)) {
-      rootNodes.push(node);
-      calculateSubtree(node, 0);
-    }
-  });
-
-  const flattenedNodes: ExtendedNode[] = [];
+  const flattenedLeads: ExtendedLeadNode[] = [];
   const lines: TreeLine[] = [];
 
-  const traverse = (node: ExtendedNode) => {
-    flattenedNodes.push(node);
+  const traverse = (node: ExtendedLeadNode) => {
+    flattenedLeads.push(node);
     node.childrenNodes.forEach((child) => {
       lines.push({
         id: `${node.id}-${child.id}`,
         x1: node.x + NODE_WIDTH / 2,
-        y1: node.y + NODE_HEIGHT,
+        y1: node.y + 140,
         x2: child.x + NODE_WIDTH / 2,
         y2: child.y,
       });
@@ -206,27 +298,24 @@ export function calculateTreeLayout(filteredNodes: OrgNode[]) {
     });
   };
 
-  rootNodes.forEach(traverse);
+  extendedRoots.forEach(traverse);
 
-  return { rootNodes: flattenedNodes, lines };
+  return { rootNodes: flattenedLeads, lines };
 }
 
 // ============================================================================
 // 4. CUSTOM HOOKS
 // ============================================================================
 
-/**
- * Custom hook to handle Canvas Pan and Zoom interactions
- */
 function useCanvasPanZoom(onDeselect: () => void) {
   const [zoom, setZoom] = useState(1);
-  const [pan, setPan] = useState({ x: 100, y: 50 });
+  const [pan, setPan] = useState({ x: 80, y: 40 });
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const dragDistance = useRef(0);
 
   const handleMouseDown = (e: React.MouseEvent) => {
-    if ((e.target as HTMLElement).closest('.tree-node-card')) return;
+    if ((e.target as HTMLElement).closest('.interactive-card')) return;
     setIsDragging(true);
     dragDistance.current = 0;
     setDragStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
@@ -255,7 +344,7 @@ function useCanvasPanZoom(onDeselect: () => void) {
 
   const resetView = () => {
     setZoom(1);
-    setPan({ x: 100, y: 50 });
+    setPan({ x: 80, y: 40 });
   };
 
   return {
@@ -271,9 +360,6 @@ function useCanvasPanZoom(onDeselect: () => void) {
   };
 }
 
-/**
- * Custom hook managing Live SpacetimeDB data synchronization & CRUD actions
- */
 function useOrgData() {
   const spacetime = useSpacetimeHook();
   const [demoNodes, setDemoNodes] = useState<OrgNode[]>(INITIAL_NODES);
@@ -284,7 +370,6 @@ function useOrgData() {
   const isConnected = spacetime.connected || true;
   const identity = spacetime.identity || 'demo_identity_0x8f2a9c';
 
-  // Real-time synchronization loop
   useEffect(() => {
     if (!spacetime.conn) {
       setNodes(demoNodes);
@@ -326,7 +411,6 @@ function useOrgData() {
     }
   }, [spacetime.conn, demoNodes, demoTasks]);
 
-  // Node CRUD operations
   const addNode = (name: string, type: string, superiorId: string) => {
     const newId = crypto.randomUUID();
     const finalName = name.trim() || 'New Member';
@@ -397,7 +481,6 @@ function useOrgData() {
     }
   };
 
-  // Task CRUD operations
   const addTask = (assignedNodeId: string, title: string) => {
     if (!assignedNodeId || !title.trim()) return;
     const newTaskId = crypto.randomUUID();
@@ -464,16 +547,13 @@ function useOrgData() {
 // 5. MODULAR SUB-COMPONENTS
 // ============================================================================
 
-/**
- * Sidebar Header & Status Banner
- */
 function SidebarHeader({ isConnected, identity }: { isConnected: boolean; identity: string | null }) {
   return (
     <>
       <header className="p-4 border-b border-slate-800 flex items-center justify-between">
         <div>
           <h1 className="font-bold text-lg text-white tracking-wide">Spacetime Org</h1>
-          <p className="text-xs text-slate-400">Live Visual Tree Explorer</p>
+          <p className="text-xs text-slate-400">Lead • Worker • Agent Tree</p>
         </div>
         <div className="flex items-center gap-2 bg-slate-950/50 px-2.5 py-1 rounded-full border border-slate-800">
           <span
@@ -495,43 +575,37 @@ function SidebarHeader({ isConnected, identity }: { isConnected: boolean; identi
   );
 }
 
-/**
- * Summary Stats Display Bar
- */
 function MetricsBar({ nodes, tasks }: { nodes: OrgNode[]; tasks: TaskItem[] }) {
   const metrics = useMemo(() => {
-    const total = nodes.filter((n) => n.type !== 'System').length;
-    const agents = nodes.filter((n) => n.type === 'Agent').length;
+    const leads = nodes.filter((n) => n.type === 'Lead').length;
     const workers = nodes.filter((n) => n.type === 'Worker').length;
+    const agents = nodes.filter((n) => n.type === 'Agent').length;
     const pendingTasks = tasks.filter((t) => !t.completed).length;
-    return { total, agents, workers, pendingTasks };
+    return { leads, workers, agents, pendingTasks };
   }, [nodes, tasks]);
 
   return (
     <div className="grid grid-cols-4 gap-1 p-3 bg-slate-950/80 border-b border-slate-800 text-center">
       <div>
-        <span className="block text-[10px] text-slate-500 uppercase">Nodes</span>
-        <span className="text-xs font-bold text-slate-200">{metrics.total}</span>
+        <span className="block text-[10px] text-indigo-400 uppercase font-semibold">Leads</span>
+        <span className="text-xs font-bold text-indigo-300">{metrics.leads}</span>
       </div>
       <div>
-        <span className="block text-[10px] text-purple-400 uppercase">Agents</span>
+        <span className="block text-[10px] text-slate-400 uppercase font-semibold">Workers</span>
+        <span className="text-xs font-bold text-slate-200">{metrics.workers}</span>
+      </div>
+      <div>
+        <span className="block text-[10px] text-purple-400 uppercase font-semibold">Agents</span>
         <span className="text-xs font-bold text-purple-300">{metrics.agents}</span>
       </div>
       <div>
-        <span className="block text-[10px] text-indigo-400 uppercase">Workers</span>
-        <span className="text-xs font-bold text-indigo-300">{metrics.workers}</span>
-      </div>
-      <div>
-        <span className="block text-[10px] text-amber-400 uppercase">Tasks</span>
+        <span className="block text-[10px] text-amber-400 uppercase font-semibold">Tasks</span>
         <span className="text-xs font-bold text-amber-300">{metrics.pendingTasks}</span>
       </div>
     </div>
   );
 }
 
-/**
- * Add Node Form Component
- */
 function AddNodeForm({
   nodes,
   onAddNode,
@@ -542,8 +616,21 @@ function AddNodeForm({
   onSelectNode: (id: string) => void;
 }) {
   const [nodeName, setNodeName] = useState('');
-  const [nodeType, setNodeType] = useState('Worker');
+  const [nodeType, setNodeType] = useState<'Lead' | 'Worker' | 'Agent'>('Worker');
   const [superiorId, setSuperiorId] = useState('');
+
+  // Valid Superior Options enforcing policy:
+  // - Lead: can choose other Leads
+  // - Worker: can choose Leads
+  // - Agent: can choose Leads or Workers (Agents CANNOT be managers)
+  const validSuperiorNodes = useMemo(() => {
+    return nodes.filter((n) => {
+      if (nodeType === 'Lead') return n.type === 'Lead';
+      if (nodeType === 'Worker') return n.type === 'Lead';
+      if (nodeType === 'Agent') return n.type === 'Lead' || n.type === 'Worker';
+      return false;
+    });
+  }, [nodes, nodeType]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -556,7 +643,7 @@ function AddNodeForm({
   return (
     <form onSubmit={handleSubmit} className="space-y-4 pt-4 border-t border-slate-800">
       <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400">
-        Add Organizational Node
+        Add Node
       </h2>
 
       <div>
@@ -567,6 +654,7 @@ function AddNodeForm({
           onChange={(e) => setNodeName(e.target.value)}
           placeholder="e.g. Lead Architect"
           className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-200 focus:outline-none focus:border-indigo-500 transition-colors"
+          required
         />
       </div>
 
@@ -575,49 +663,39 @@ function AddNodeForm({
         <select
           value={nodeType}
           onChange={(e) => {
-            const newType = e.target.value;
-            setNodeType(newType);
-            if (superiorId) {
-              const sup = nodes.find((n) => n.id === superiorId);
-              if (sup && sup.type === 'Agent') {
-                setSuperiorId('');
-              }
-            }
+            const nextType = e.target.value as 'Lead' | 'Worker' | 'Agent';
+            setNodeType(nextType);
+            setSuperiorId('');
           }}
           className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-200 focus:outline-none focus:border-indigo-500 transition-colors"
         >
-          <option value="Worker">Worker</option>
-          <option value="Agent">Agent</option>
+          <option value="Lead">Lead (Tree Node)</option>
+          <option value="Worker">Worker (Row Member)</option>
+          <option value="Agent">Agent (Hover Dot)</option>
         </select>
       </div>
 
       <div>
-        <label className="block text-xs font-medium text-slate-300 mb-1">Superior Node (Optional)</label>
+        <label className="block text-xs font-medium text-slate-300 mb-1">Superior Node</label>
         <select
           value={superiorId}
           onChange={(e) => setSuperiorId(e.target.value)}
           className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-200 focus:outline-none focus:border-indigo-500 transition-colors"
         >
           <option value="" className="bg-slate-900 text-slate-200">
-            None (Top-Level Root)
+            {nodeType === 'Lead' ? 'None (Root Lead)' : 'Select Superior...'}
           </option>
-          {nodes
-            .filter((n) => {
-              if (n.type === 'System') return false;
-              if (n.type === 'Agent') return false;
-              return true;
-            })
-            .map((n) => (
-              <option key={n.id} value={n.id} className="bg-slate-900 text-slate-200">
-                {n.name} ({n.type})
-              </option>
-            ))}
+          {validSuperiorNodes.map((n) => (
+            <option key={n.id} value={n.id} className="bg-slate-900 text-slate-200">
+              {n.name} ({n.type})
+            </option>
+          ))}
         </select>
-        {nodeType === 'Agent' && (
-          <p className="text-[10px] text-amber-400/90 mt-1">
-            Note: Agent nodes cannot be selected as superior nodes.
-          </p>
-        )}
+        <p className="text-[10px] text-slate-500 mt-1">
+          {nodeType === 'Worker' && 'Workers must report to a Lead.'}
+          {nodeType === 'Agent' && 'Agents can be assigned to a Lead or Worker.'}
+          {nodeType === 'Lead' && 'Leads report to higher Leads or serve as Root.'}
+        </p>
       </div>
 
       <button
@@ -630,9 +708,6 @@ function AddNodeForm({
   );
 }
 
-/**
- * Floating Controls Toolbar for Zooming and Resetting the Canvas
- */
 function CanvasToolbar({
   zoom,
   setZoom,
@@ -672,9 +747,53 @@ function CanvasToolbar({
   );
 }
 
-/**
- * Task Management List inside Node Inspector
- */
+// Hoverable Agent Dot Component
+function AgentDot({
+  agent,
+  onSelectAgent,
+}: {
+  agent: OrgNode;
+  onSelectAgent: (id: string) => void;
+}) {
+  const [showTooltip, setShowTooltip] = useState(false);
+
+  const statusColor =
+    agent.status === 'Active'
+      ? 'bg-emerald-400 border-emerald-300 shadow-emerald-400/50'
+      : agent.status === 'Busy'
+        ? 'bg-amber-400 border-amber-300 shadow-amber-400/50'
+        : 'bg-purple-400 border-purple-300 shadow-purple-400/50';
+
+  return (
+    <div className="relative inline-block">
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          onSelectAgent(agent.id);
+        }}
+        onMouseEnter={() => setShowTooltip(true)}
+        onMouseLeave={() => setShowTooltip(false)}
+        className={`w-3.5 h-3.5 rounded-full border ${statusColor} hover:scale-125 transition-transform cursor-pointer shadow-sm`}
+        title={agent.name}
+      />
+
+      {/* Hover Tooltip */}
+      {showTooltip && (
+        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-30 w-36 bg-slate-900 border border-purple-500/40 rounded-lg p-2 shadow-2xl text-left pointer-events-none">
+          <div className="flex items-center justify-between text-[9px] font-bold uppercase text-purple-400 mb-0.5">
+            <span>Agent</span>
+            <span className="font-mono text-slate-400">{agent.status || 'Idle'}</span>
+          </div>
+          <div className="text-xs font-semibold text-white truncate">{agent.name}</div>
+          <div className="text-[9px] font-mono text-slate-400 truncate mt-0.5">
+            ID: {agent.id.slice(0, 10)}...
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TaskManagerSection({
   selectedNodeId,
   tasks,
@@ -766,9 +885,6 @@ function TaskManagerSection({
   );
 }
 
-/**
- * Edit Node Form Mode inside Node Inspector
- */
 function EditNodeForm({
   selectedNode,
   nodes,
@@ -791,6 +907,19 @@ function EditNodeForm({
     setEditType(selectedNode.type);
     setEditSuperiorId(parseSuperior(selectedNode) || '');
   }, [selectedNode]);
+
+  const validSuperiors = useMemo(() => {
+    const descendants = getDescendants(selectedNode.id, nodes);
+    return nodes.filter((n) => {
+      if (n.id === selectedNode.id) return false;
+      if (descendants.has(n.id)) return false;
+
+      if (editType === 'Lead') return n.type === 'Lead';
+      if (editType === 'Worker') return n.type === 'Lead';
+      if (editType === 'Agent') return n.type === 'Lead' || n.type === 'Worker';
+      return false;
+    });
+  }, [selectedNode, nodes, editType]);
 
   const handleFormSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -815,9 +944,13 @@ function EditNodeForm({
         <label className="block text-xs font-medium text-slate-300 mb-1">Type</label>
         <select
           value={editType}
-          onChange={(e) => setEditType(e.target.value)}
+          onChange={(e) => {
+            setEditType(e.target.value);
+            setEditSuperiorId('');
+          }}
           className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
         >
+          <option value="Lead">Lead</option>
           <option value="Worker">Worker</option>
           <option value="Agent">Agent</option>
         </select>
@@ -831,22 +964,13 @@ function EditNodeForm({
           className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
         >
           <option value="" className="bg-slate-900 text-slate-200">
-            None (Root Node)
+            {editType === 'Lead' ? 'None (Root Node)' : 'Select Superior...'}
           </option>
-          {nodes
-            .filter((n) => {
-              if (n.id === selectedNode.id) return false;
-              if (n.type === 'System') return false;
-              const descendants = getDescendants(selectedNode.id, nodes);
-              if (descendants.has(n.id)) return false;
-              if (n.type === 'Agent') return false;
-              return true;
-            })
-            .map((n) => (
-              <option key={n.id} value={n.id} className="bg-slate-900 text-slate-200">
-                {n.name} ({n.type})
-              </option>
-            ))}
+          {validSuperiors.map((n) => (
+            <option key={n.id} value={n.id} className="bg-slate-900 text-slate-200">
+              {n.name} ({n.type})
+            </option>
+          ))}
         </select>
       </div>
 
@@ -877,9 +1001,6 @@ function EditNodeForm({
   );
 }
 
-/**
- * Node Inspector & Tasks Right Panel
- */
 function NodeInspector({
   selectedNode,
   nodes,
@@ -908,6 +1029,7 @@ function NodeInspector({
   }, [selectedNode.id]);
 
   const supId = parseSuperior(selectedNode);
+  const superiorNode = supId ? nodes.find((n) => n.id === supId) : null;
 
   return (
     <aside className="w-80 border-l border-slate-800 bg-slate-900/90 backdrop-blur p-6 z-20 flex flex-col justify-between shadow-2xl overflow-y-auto">
@@ -948,7 +1070,14 @@ function NodeInspector({
         ) : (
           <div className="space-y-4">
             <div className="p-4 bg-slate-950 rounded-xl border border-slate-800">
-              <span className="text-xs text-indigo-400 font-semibold uppercase">
+              <span
+                className={`text-xs font-bold uppercase px-2 py-0.5 rounded border inline-block mb-1 ${selectedNode.type === 'Lead'
+                    ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                    : selectedNode.type === 'Worker'
+                      ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/30'
+                      : 'bg-purple-500/10 text-purple-400 border-purple-500/30'
+                  }`}
+              >
                 {selectedNode.type}
               </span>
               <h3 className="text-lg font-bold text-white mt-1">{selectedNode.name}</h3>
@@ -968,12 +1097,12 @@ function NodeInspector({
               <div>
                 <span className="text-xs text-slate-500 uppercase block">Superior Node</span>
                 <p className="text-xs text-slate-300 mt-1">
-                  {supId ? (
+                  {superiorNode ? (
                     <span className="font-mono text-indigo-400 bg-indigo-950/40 px-2 py-1 rounded border border-indigo-800/40 inline-block">
-                      {supId}
+                      {superiorNode.name} ({superiorNode.type})
                     </span>
                   ) : (
-                    <span className="italic text-slate-600">None (Top Level Root)</span>
+                    <span className="italic text-slate-600">None (Top Level)</span>
                   )}
                 </p>
               </div>
@@ -991,7 +1120,7 @@ function NodeInspector({
       </div>
 
       <div className="text-center text-[11px] text-slate-500 border-t border-slate-800 pt-4 mt-6">
-        SpacetimeDB Org Visualizer
+        SpacetimeDB Org Tree Visualizer
       </div>
     </aside>
   );
@@ -1015,7 +1144,7 @@ export default function Page() {
     toggleTask,
   } = useOrgData();
 
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>('root-1');
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>('node-1');
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState('ALL');
 
@@ -1033,21 +1162,34 @@ export default function Page() {
 
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Filter nodes based on Search & Node Type
+  // Filter nodes while preserving parent hierarchy context
   const filteredNodes = useMemo(() => {
-    return nodes.filter((n) => {
-      if (n.type === 'System') return false;
+    const matchedNodeIds = new Set<string>();
+
+    nodes.forEach((n) => {
+      if (n.type === 'System') return;
       const matchesSearch =
+        !searchQuery ||
         n.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         n.id.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesType = filterType === 'ALL' || n.type === filterType;
-      return matchesSearch && matchesType;
+
+      if (matchesSearch && matchesType) {
+        matchedNodeIds.add(n.id);
+        let sup = parseSuperior(n);
+        while (sup) {
+          matchedNodeIds.add(sup);
+          const parentNode = nodes.find((item) => item.id === sup);
+          sup = parentNode ? parseSuperior(parentNode) : null;
+        }
+      }
     });
+
+    return nodes.filter((n) => matchedNodeIds.has(n.id));
   }, [nodes, searchQuery, filterType]);
 
-  // Compute Layout Position & Connector Lines
   const treeLayout = useMemo(() => {
-    return calculateTreeLayout(filteredNodes);
+    return calculateLeadTreeLayout(filteredNodes);
   }, [filteredNodes]);
 
   const selectedNode = useMemo(() => {
@@ -1075,8 +1217,8 @@ export default function Page() {
               className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
             />
 
-            <div className="grid grid-cols-3 gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800 text-xs">
-              {['ALL', 'Worker', 'Agent'].map((type) => (
+            <div className="grid grid-cols-4 gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800 text-xs">
+              {['ALL', 'Lead', 'Worker', 'Agent'].map((type) => (
                 <button
                   key={type}
                   onClick={() => setFilterType(type)}
@@ -1129,7 +1271,7 @@ export default function Page() {
           }}
           className="absolute top-0 left-0 w-full h-full pointer-events-none"
         >
-          {/* Connector Curves */}
+          {/* Upper Tree Lead Connector Curves */}
           <svg className="absolute inset-0 w-[5000px] h-[5000px] pointer-events-none overflow-visible">
             <defs>
               <linearGradient id="line-grad" x1="0%" y1="0%" x2="0%" y2="100%">
@@ -1153,46 +1295,137 @@ export default function Page() {
             })}
           </svg>
 
-          {/* Rendered Node Cards */}
+          {/* Rendered Lead Trees & Attached Worker Rows */}
           {treeLayout.rootNodes.map((node) => {
             const isSelected = selectedNodeId === node.id;
+
             return (
               <div
                 key={node.id}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setSelectedNodeId(node.id);
-                }}
                 style={{
                   left: `${node.x}px`,
                   top: `${node.y}px`,
-                  width: '220px',
+                  width: '360px',
                 }}
-                className={`tree-node-card absolute pointer-events-auto cursor-pointer rounded-xl p-4 transition-all duration-200 border shadow-xl ${isSelected
-                    ? 'bg-slate-900 border-indigo-500 shadow-indigo-500/20 ring-2 ring-indigo-500/50 scale-105 z-10'
-                    : 'bg-slate-900/90 border-slate-800 hover:border-slate-700 hover:bg-slate-800/90'
-                  }`}
+                className="absolute pointer-events-auto flex flex-col items-center"
               >
-                <div className="flex items-center justify-between mb-2">
-                  <span
-                    className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${node.type === 'Agent'
-                        ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20'
-                        : 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20'
-                      }`}
-                  >
-                    {node.type}
-                  </span>
-                  <span className="flex items-center gap-1.5 text-[11px] text-slate-400">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                    {node.status || 'Idle'}
-                  </span>
+                {/* Lead Card Container */}
+                <div
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedNodeId(node.id);
+                  }}
+                  className={`interactive-card w-full cursor-pointer rounded-xl p-4 transition-all duration-200 border shadow-xl ${isSelected
+                      ? 'bg-slate-900 border-indigo-500 shadow-indigo-500/25 ring-2 ring-indigo-500/50 scale-[1.02] z-10'
+                      : 'bg-slate-900/95 border-slate-800 hover:border-slate-700 hover:bg-slate-900'
+                    }`}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border bg-amber-500/10 text-amber-400 border-amber-500/30">
+                      {node.level === 0 ? 'Root Lead' : 'Team Lead'}
+                    </span>
+                    <span className="flex items-center gap-1.5 text-[11px] text-slate-400">
+                      <span
+                        className={`w-2 h-2 rounded-full ${node.status === 'Active'
+                            ? 'bg-emerald-400 shadow-emerald-400/50'
+                            : node.status === 'Busy'
+                              ? 'bg-amber-400'
+                              : 'bg-slate-400'
+                          }`}
+                      />
+                      {node.status || 'Idle'}
+                    </span>
+                  </div>
+
+                  <h3 className="font-bold text-slate-100 text-sm truncate">{node.name}</h3>
+
+                  {/* Direct Agent Dots assigned to this Lead */}
+                  {node.assignedAgents && node.assignedAgents.length > 0 && (
+                    <div className="mt-2.5 pt-2 border-t border-slate-800/80 flex items-center justify-between">
+                      <span className="text-[10px] text-purple-400 font-semibold uppercase">
+                        Lead Agents ({node.assignedAgents.length})
+                      </span>
+                      <div className="flex items-center gap-1.5 overflow-x-auto max-w-[200px]">
+                        {node.assignedAgents.map((agent) => (
+                          <AgentDot
+                            key={agent.id}
+                            agent={agent}
+                            onSelectAgent={(id) => setSelectedNodeId(id)}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
-                <h3 className="font-bold text-slate-100 text-sm truncate">{node.name}</h3>
+                {/* Vertical Stem Line Connecting to Subordinate Workers */}
+                {node.teamWorkers && node.teamWorkers.length > 0 && (
+                  <>
+                    <div className="w-0.5 h-4 bg-gradient-to-b from-indigo-500 to-purple-500 opacity-70" />
 
-                <p className="text-[10px] font-mono text-slate-500 truncate mt-1">
-                  ID: {node.id.slice(0, 12)}...
-                </p>
+                    {/* Subordinates Row Box */}
+                    <div className="w-full bg-slate-950/90 border border-slate-800/90 rounded-xl p-3 shadow-xl backdrop-blur-sm">
+                      <div className="flex items-center justify-between mb-2 pb-1.5 border-b border-slate-800/80 px-1">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-400">
+                          Team Workers ({node.teamWorkers.length})
+                        </span>
+                        <span className="text-[9px] font-mono text-slate-500">Agent Dots</span>
+                      </div>
+
+                      {/* Subordinate Worker Rows */}
+                      <div className="space-y-1.5 max-h-56 overflow-y-auto pr-0.5 custom-scrollbar">
+                        {node.teamWorkers.map((worker) => {
+                          const isWorkerSelected = selectedNodeId === worker.id;
+                          return (
+                            <div
+                              key={worker.id}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedNodeId(worker.id);
+                              }}
+                              className={`flex items-center justify-between p-2 rounded-lg text-xs transition-all border cursor-pointer ${isWorkerSelected
+                                  ? 'bg-indigo-950/80 border-indigo-500 text-indigo-100 font-medium ring-1 ring-indigo-500/40 shadow-md'
+                                  : 'bg-slate-900/80 border-slate-800 text-slate-300 hover:bg-slate-800 hover:border-slate-700'
+                                }`}
+                            >
+                              {/* Worker Label & Status */}
+                              <div className="flex items-center gap-2 truncate pr-2">
+                                <span
+                                  className={`w-2 h-2 rounded-full shrink-0 ${worker.status === 'Active'
+                                      ? 'bg-emerald-400'
+                                      : worker.status === 'Busy'
+                                        ? 'bg-amber-400'
+                                        : 'bg-slate-500'
+                                    }`}
+                                />
+                                <span className="truncate text-[11px] font-medium leading-tight">
+                                  {worker.name}
+                                </span>
+                              </div>
+
+                              {/* Hoverable Agent Dots for this Worker */}
+                              <div className="flex items-center gap-1 shrink-0">
+                                {worker.assignedAgents.length > 0 ? (
+                                  worker.assignedAgents.map((agent) => (
+                                    <AgentDot
+                                      key={agent.id}
+                                      agent={agent}
+                                      onSelectAgent={(id) => setSelectedNodeId(id)}
+                                    />
+                                  ))
+                                ) : (
+                                  <span className="text-[9px] text-slate-600 font-mono italic">
+                                    no agents
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
             );
           })}
