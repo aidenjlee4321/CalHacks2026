@@ -10,6 +10,35 @@ import {
   type Infer as __Infer,
 } from "spacetimedb";
 
+export const Activity = __t.object("Activity", {
+  id: __t.u64(),
+  nodeId: __t.string(),
+  kind: __t.string(),
+  message: __t.string(),
+  createdAt: __t.timestamp(),
+});
+export type Activity = __Infer<typeof Activity>;
+
+export const EscalationTimer = __t.object("EscalationTimer", {
+  scheduledId: __t.u64(),
+  scheduledAt: __t.scheduleAt(),
+  handoffId: __t.u64(),
+});
+export type EscalationTimer = __Infer<typeof EscalationTimer>;
+
+export const Handoff = __t.object("Handoff", {
+  id: __t.u64(),
+  taskId: __t.string(),
+  fromNodeId: __t.string(),
+  assignedToId: __t.string(),
+  question: __t.string(),
+  context: __t.string(),
+  status: __t.string(),
+  answer: __t.string(),
+  createdAt: __t.timestamp(),
+});
+export type Handoff = __Infer<typeof Handoff>;
+
 export const OrgNode = __t.object("OrgNode", {
   id: __t.string(),
   name: __t.string(),

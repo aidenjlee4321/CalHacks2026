@@ -21,13 +21,16 @@ export function SpacetimeProvider({ children }: { children: React.ReactNode }) {
     const [connected, setConnected] = useState(false);
     const [identity, setIdentity] = useState<string | null>(null);
     const [conn, setConn] = useState<DbConnection | null>(null);
+    const [mounted, setMounted] = useState(false);
 
     useEffect(() => {
+        setMounted(true);
+
         const connection = DbConnection.builder()
-            .withUri('http://127.0.0.1:3000')
-            .withDatabaseName('org-backend')
+            .withUri('wss://maincloud.spacetimedb.com')
+            .withDatabaseName('org-backend-afa0s')
             .onConnect((c, id) => {
-                console.log('Connected to SpacetimeDB!', id);
+                console.log('Connected to SpacetimeDB Cloud!', id);
                 setConnected(true);
                 setIdentity(typeof id === 'string' ? id : id.toHexString());
                 setConn(c);
@@ -52,6 +55,8 @@ export function SpacetimeProvider({ children }: { children: React.ReactNode }) {
             connection.disconnect();
         };
     }, []);
+
+    if (!mounted) return null;
 
     return (
         <SpacetimeContext.Provider value={{ connected, identity, conn }}>
