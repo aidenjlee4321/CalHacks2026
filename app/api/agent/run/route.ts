@@ -1,3 +1,4 @@
+import { createWithWebTools } from '@/lib/apifyWebTool';
 import { NextResponse } from 'next/server';
 import { anthropic, AGENT_MODEL, SUPPORTS_FALLBACKS, summarizeUsage } from '@/lib/claude';
 import { getAgentModel } from '@/lib/agentModels';
@@ -34,7 +35,8 @@ export async function POST(req: Request) {
 
     try {
         // 2. Run the task. Server-side fallbacks retry a declined request on another model.
-        const response = await anthropic.beta.messages.create({
+        // Agents can browse the web through Apify when a task needs real-world info
+        const response = await createWithWebTools({
             model,
             max_tokens: 16000,
             ...(SUPPORTS_FALLBACKS.has(model) && {
@@ -48,7 +50,7 @@ export async function POST(req: Request) {
         });
 
         const latencyMs = Date.now() - startTime;
-        const textBlock = response.content.find((block) => block.type === 'text');
+        const textBlock = response.content.find((block: any) => block.type === 'text');
         const resultText = textBlock?.type === 'text' ? textBlock.text : 'No response generated.';
         const usage = summarizeUsage(response.model, response.usage);
         const refused = response.stop_reason === 'refusal';
