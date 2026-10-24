@@ -24,7 +24,14 @@ export interface TelemetryRecord {
     promptTokens?: number;
     completionTokens?: number;
     totalTokens?: number;
-    status?: 'SUCCESS' | 'FAILED' | 'RUNNING' | string;
+    cacheReadTokens?: number;
+    cacheWriteTokens?: number;
+    costUsd?: number | null;
+    model?: string;
+    stopReason?: string | null;
+    source?: 'manual' | 'demo' | 'investigation' | string;
+    error?: string;
+    status?: 'SUCCESS' | 'FAILED' | 'REFUSED' | 'RUNNING' | string;
     resultText?: string;
     resultPreview?: string;
     details?: Record<string, any>;
@@ -40,8 +47,13 @@ export type TelemetryEvent = TelemetryRecord;
 // IN-MEMORY LIVE CACHE & DEDUPLICATION
 // ============================================================================
 
-export const telemetryData: TelemetryRecord[] = [];
-const seenEventIds = new Set<string>();
+// Kept on globalThis so every route handler (and dev hot reloads) share one cache.
+const store = globalThis as typeof globalThis & {
+    __telemetryData?: TelemetryRecord[];
+    __telemetrySeenIds?: Set<string>;
+};
+export const telemetryData: TelemetryRecord[] = (store.__telemetryData ??= []);
+const seenEventIds: Set<string> = (store.__telemetrySeenIds ??= new Set<string>());
 const MAX_CACHE_SIZE = 1000;
 
 // ============================================================================
@@ -84,6 +96,13 @@ export function recordTelemetry(
         promptTokens: record.promptTokens ?? 0,
         completionTokens: record.completionTokens ?? 0,
         totalTokens: record.totalTokens ?? record.tokens ?? 0,
+        cacheReadTokens: record.cacheReadTokens ?? 0,
+        cacheWriteTokens: record.cacheWriteTokens ?? 0,
+        costUsd: record.costUsd ?? null,
+        model: record.model,
+        stopReason: record.stopReason ?? null,
+        source: record.source || 'manual',
+        error: record.error,
         status: record.status || 'SUCCESS',
         resultText: record.resultText,
         resultPreview: record.resultPreview || record.resultText?.slice(0, 100),
@@ -130,6 +149,11 @@ export const recordOrgEvent = recordTelemetry;
 
 export function getTelemetry(): TelemetryRecord[] {
     return telemetryData;
+}
+
+export function clearTelemetry() {
+    telemetryData.length = 0;
+    seenEventIds.clear();
 }
 
 export function getTelemetryByNode(nodeId: string): TelemetryRecord[] {

@@ -1,45 +1,47 @@
 import { NextResponse } from 'next/server';
-import Anthropic from '@anthropic-ai/sdk';
+import { anthropic, AGENT_MODEL, SUPPORTS_FALLBACKS, summarizeUsage } from '@/lib/claude';
+import { getAgentModel } from '@/lib/agentModels';
 import { recordTelemetry } from '@/lib/telemetryStore';
-
-const anthropic = new Anthropic({
-    apiKey: process.env.ANTHROPIC_API_KEY,
-});
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export async function POST(req: Request) {
+    const {
+        agentId,
+        agentName,
+        taskId,
+        prompt,
+        delaySeconds = 0,
+        source = 'manual',
+    } = await req.json();
+
+    // 1. Simulate API delay if requested (kept out of the measured latency)
+    if (delaySeconds > 0) {
+        await sleep(delaySeconds * 1000);
+    }
+
+    const startTime = Date.now();
+    const base = {
+        id: crypto.randomUUID(),
+        agentId: agentId || 'unknown-agent',
+        agentName: agentName || 'Agent',
+        taskId,
+        source,
+    };
+
+    // Each agent runs on its own assigned model
+    const model = getAgentModel(agentId, AGENT_MODEL);
+
     try {
-        const { agentId, agentName, prompt, delaySeconds = 0 } = await req.json();
-
-        const startTime = Date.now();
-
-        // 1. Simulate API delay if requested
-        if (delaySeconds > 0) {
-            await sleep(delaySeconds * 1000);
-        }
-
-        // 2. Discover an active model dynamically for this ANTHROPIC_API_KEY
-        let modelId: string | null = null;
-        try {
-            const modelsPage = await anthropic.models.list();
-            if (modelsPage.data && modelsPage.data.length > 0) {
-                // Pick the first available model authorized for this key
-                modelId = modelsPage.data[0].id;
-            }
-        } catch (listErr) {
-            console.warn('Could not query Anthropic models API dynamically:', listErr);
-        }
-
-        // Fallback candidates if model list query returns empty or fails
-        if (!modelId) {
-            modelId = 'claude-3-5-sonnet-latest';
-        }
-
-        // 3. Execute prompt against resolved model
-        const response = await anthropic.messages.create({
-            model: modelId,
-            max_tokens: 1024,
+        // 2. Run the task. Server-side fallbacks retry a declined request on another model.
+        const response = await anthropic.beta.messages.create({
+            model,
+            max_tokens: 16000,
+            ...(SUPPORTS_FALLBACKS.has(model) && {
+                betas: ['server-side-fallback-2026-07-01'],
+                fallbacks: 'default' as const,
+            }),
+            system: `You are ${agentName || 'an AI agent'}, an AI agent working inside a company org chart alongside human employees. Complete the assigned task and reply with a concise work report.`,
             messages: [
                 { role: 'user', content: prompt || 'Execute the assigned task efficiently.' },
             ],
@@ -47,30 +49,49 @@ export async function POST(req: Request) {
 
         const latencyMs = Date.now() - startTime;
         const textBlock = response.content.find((block) => block.type === 'text');
-        const resultText = textBlock ? textBlock.text : 'No response generated.';
-        const tokens =
-            (response.usage?.input_tokens || 0) + (response.usage?.output_tokens || 0);
+        const resultText = textBlock?.type === 'text' ? textBlock.text : 'No response generated.';
+        const usage = summarizeUsage(response.model, response.usage);
+        const refused = response.stop_reason === 'refusal';
 
-        // 4. Record run telemetry
+        // 3. Record run telemetry
         recordTelemetry({
-            id: crypto.randomUUID(),
-            agentId: agentId || 'unknown-agent',
-            agentName: agentName || 'Agent',
+            ...base,
+            model: response.model,
+            status: refused ? 'REFUSED' : 'SUCCESS',
+            stopReason: response.stop_reason,
             latencyMs,
-            tokens,
+            tokens: usage.totalTokens,
+            totalTokens: usage.totalTokens,
+            promptTokens: usage.inputTokens,
+            completionTokens: usage.outputTokens,
+            cacheReadTokens: usage.cacheReadTokens,
+            cacheWriteTokens: usage.cacheWriteTokens,
+            costUsd: usage.costUsd,
             resultText,
             timestamp: Date.now(),
         });
 
         return NextResponse.json({
-            success: true,
+            success: !refused,
             resultText,
-            tokens,
+            tokens: usage.totalTokens,
+            usage,
             latencyMs,
-            modelUsed: modelId,
+            modelUsed: response.model,
+            ...(refused && { error: 'The model declined this task.' }),
         });
     } catch (error) {
         console.error('Claude API Error:', error);
+        recordTelemetry({
+            ...base,
+            model,
+            status: 'FAILED',
+            latencyMs: Date.now() - startTime,
+            tokens: 0,
+            costUsd: 0,
+            error: String(error),
+            timestamp: Date.now(),
+        });
         return NextResponse.json(
             { success: false, error: String(error) },
             { status: 500 }

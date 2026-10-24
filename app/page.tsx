@@ -3,6 +3,10 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { useOrgData, OrgNode, TaskItem } from '@/hooks/useOrgData';
+import { useTelemetry } from '@/hooks/useTelemetry';
+import { UsageRow, UsageTotals, ownedAgents, sumTotals, teamAgentIds, usageByAgent } from '@/lib/agentUsage';
+import AgentSpendPanel from '@/components/AgentSpendPanel';
+import { formatCompact, formatUsd } from '@/components/UsageCharts';
 
 // ============================================================================
 // 1. TYPES & LAYOUT MODELS
@@ -666,10 +670,18 @@ function NodeInspector({
   onToggleTask,
   onDeleteTask,
   onExecuteTask,
+  agentUsage,
+  defaultModel,
+  agentModels,
+  onModelChange,
 }: {
   selectedNode: OrgNode;
   nodes: OrgNode[];
   tasks: TaskItem[];
+  agentUsage: Map<string, UsageRow>;
+  defaultModel: string | null;
+  agentModels: Record<string, string>;
+  onModelChange: () => void;
   runningTaskId?: string | null;
   agentResult?: string | null;
   onClose: () => void;
@@ -815,6 +827,15 @@ function NodeInspector({
               </p>
             </div>
           </div>
+
+          <AgentSpendPanel
+            node={selectedNode}
+            nodes={nodes}
+            byAgent={agentUsage}
+            defaultModel={defaultModel}
+            agentModels={agentModels}
+            onModelChange={onModelChange}
+          />
 
           {/* Investigator Action & Findings Panel */}
           <div className="border-t border-slate-800 pt-4 space-y-3">
@@ -1051,6 +1072,21 @@ export default function Page() {
   const treeLayout = useMemo(() => calculateLeadTreeLayout(filteredNodes), [filteredNodes]);
   const selectedNode = useMemo(() => nodes.find((n) => n.id === selectedNodeId) || null, [nodes, selectedNodeId]);
 
+  // Agent token/cost spend per person: their own agents, and every agent in their team
+  const { records: telemetry, defaultModel, agentModels, refresh: refreshTelemetry } = useTelemetry();
+  const agentUsage = useMemo(() => usageByAgent(telemetry), [telemetry]);
+  const spendByPerson = useMemo(() => {
+    const spend = new Map<string, { own: UsageTotals; team: UsageTotals }>();
+    for (const person of nodes) {
+      if (person.type === 'Agent') continue;
+      spend.set(person.id, {
+        own: sumTotals(ownedAgents(person.id, nodes).map((a) => a.id), agentUsage),
+        team: sumTotals(teamAgentIds(person.id, nodes), agentUsage),
+      });
+    }
+    return spend;
+  }, [nodes, agentUsage]);
+
   return (
     <div className="flex h-screen w-full bg-slate-950 text-slate-100 overflow-hidden font-sans">
       <aside className="w-80 border-r border-slate-800 bg-slate-900/90 backdrop-blur flex flex-col z-20 shadow-2xl">
@@ -1216,6 +1252,17 @@ export default function Page() {
                       </div>
                     </div>
                   )}
+
+                  {(spendByPerson.get(node.id)?.team.runs ?? 0) > 0 && (
+                    <div className="mt-2 pt-2 border-t border-slate-800/80 flex items-center justify-between">
+                      <span className="text-[10px] text-slate-400 font-semibold uppercase">Team Agent Spend</span>
+                      <span className="text-[11px] tabular-nums text-slate-300">
+                        <span className="font-semibold text-white">{formatUsd(spendByPerson.get(node.id)!.team.cost)}</span>
+                        {' · '}
+                        {formatCompact(spendByPerson.get(node.id)!.team.input + spendByPerson.get(node.id)!.team.output)} tok
+                      </span>
+                    </div>
+                  )}
                 </div>
 
                 {node.teamWorkers && node.teamWorkers.length > 0 && (
@@ -1253,6 +1300,11 @@ export default function Page() {
                               </div>
 
                               <div className="flex items-center gap-1 shrink-0">
+                                {(spendByPerson.get(worker.id)?.own.runs ?? 0) > 0 && (
+                                  <span className="text-[10px] tabular-nums text-slate-400 mr-1">
+                                    {formatUsd(spendByPerson.get(worker.id)!.own.cost)}
+                                  </span>
+                                )}
                                 {worker.assignedAgents.length > 0 ? (
                                   worker.assignedAgents.map((agent) => (
                                     <AgentDot key={agent.id} agent={agent} onSelectAgent={(id) => setSelectedNodeId(id)} />
@@ -1288,6 +1340,10 @@ export default function Page() {
           onToggleTask={toggleTask}
           onDeleteTask={deleteTask}
           onExecuteTask={handleExecuteTaskWithAgent}
+          agentUsage={agentUsage}
+          defaultModel={defaultModel}
+          agentModels={agentModels}
+          onModelChange={refreshTelemetry}
         />
       )}
     </div>
