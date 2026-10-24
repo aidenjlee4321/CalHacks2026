@@ -3,6 +3,10 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { useOrgData, OrgNode, TaskItem } from '@/hooks/useOrgData';
+import { useTelemetry } from '@/hooks/useTelemetry';
+import { UsageRow, UsageTotals, ownedAgents, sumTotals, teamAgentIds, usageByAgent } from '@/lib/agentUsage';
+import AgentSpendPanel from '@/components/AgentSpendPanel';
+import { formatCompact, formatUsd } from '@/components/UsageCharts';
 
 // ============================================================================
 // 1. TYPES & LAYOUT MODELS
@@ -651,10 +655,18 @@ function NodeInspector({
   onToggleTask,
   onDeleteTask,
   onExecuteTask,
+  agentUsage,
+  defaultModel,
+  agentModels,
+  onModelChange,
 }: {
   selectedNode: OrgNode;
   nodes: OrgNode[];
   tasks: TaskItem[];
+  agentUsage: Map<string, UsageRow>;
+  defaultModel: string | null;
+  agentModels: Record<string, string>;
+  onModelChange: () => void;
   runningTaskId?: string | null;
   agentResult?: string | null;
   onClose: () => void;
@@ -667,6 +679,86 @@ function NodeInspector({
 }) {
   const supId = parseSuperior(selectedNode);
   const superiorNode = supId ? nodes.find((n) => n.id === supId) : null;
+  const [investigating, setInvestigating] = useState(false);
+  const [finding, setFinding] = useState<any>(null);
+
+  // Feedback form state
+  const [correctionText, setCorrectionText] = useState('');
+  const [isSubmittingFeedback, setIsSubmittingFeedback] = useState(false);
+  const [feedbackSuccess, setFeedbackSuccess] = useState(false);
+
+  const handleRunInvestigation = async () => {
+    if (!selectedNode || !selectedNode.id) {
+      console.error('Cannot run investigation: selectedNode is null or missing an id', selectedNode);
+      return;
+    }
+
+    setInvestigating(true);
+    setFinding(null);
+
+    try {
+      const res = await fetch('/api/investigations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          targetNode: selectedNode,
+          nodes: nodes || [],
+          tasks: tasks || [],
+        }),
+      });
+
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error(`Server error (${res.status}):`, errorText);
+        return;
+      }
+
+      const data = await res.json();
+      if (data.success) {
+        setFinding(data.finding);
+      }
+    } catch (err) {
+      console.error('Investigation execution error:', err);
+    } finally {
+      setInvestigating(false);
+    }
+  };
+
+  const handleSendFeedback = async () => {
+    if (!correctionText.trim()) return;
+    setIsSubmittingFeedback(true);
+
+    try {
+      const res = await fetch('/api/investigations/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          nodeId: selectedNode.id,
+          triggerPattern: finding?.hypothesis || 'General Correction',
+          correction: correctionText,
+        }),
+      });
+
+      // 1. Guard against non-JSON error pages (404/500)
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error(`Feedback server error (${res.status}):`, errorText);
+        return;
+      }
+
+      // 2. Safe to parse JSON
+      const data = await res.json();
+      if (data.success) {
+        setFeedbackSuccess(true);
+        setCorrectionText('');
+        setTimeout(() => setFeedbackSuccess(false), 3000);
+      }
+    } catch (err) {
+      console.error('Feedback execution error:', err);
+    } finally {
+      setIsSubmittingFeedback(false);
+    }
+  };
 
   return (
     <aside className="w-80 border-l border-slate-800 bg-slate-900/90 backdrop-blur p-6 z-20 flex flex-col justify-between shadow-2xl overflow-y-auto">
@@ -721,6 +813,98 @@ function NodeInspector({
             </div>
           </div>
 
+          <AgentSpendPanel
+            node={selectedNode}
+            nodes={nodes}
+            byAgent={agentUsage}
+            defaultModel={defaultModel}
+            agentModels={agentModels}
+            onModelChange={onModelChange}
+          />
+
+          {/* Investigator Action & Findings Panel */}
+          <div className="border-t border-slate-800 pt-4 space-y-3">
+            <button
+              onClick={handleRunInvestigation}
+              disabled={investigating}
+              className="w-full py-2 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-semibold text-xs rounded-lg transition-colors flex items-center justify-center gap-1.5 shadow-md shadow-purple-600/20"
+            >
+              {investigating ? '🔍 Analyzing Evidence...' : '🔬 Run Agent Investigation'}
+            </button>
+
+            {finding && (
+              <div className="p-3 bg-purple-950/40 border border-purple-800/50 rounded-lg space-y-3 text-xs">
+                {/* Diagnosis */}
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-purple-400 block mb-1">
+                    Diagnosis & Hypothesis
+                  </span>
+                  <p className="text-slate-200 leading-relaxed bg-slate-950/50 p-2 rounded border border-purple-900/40">
+                    {finding.hypothesis}
+                  </p>
+                </div>
+
+                {/* Key Facts */}
+                {finding.facts && finding.facts.length > 0 && (
+                  <div>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-purple-400 block mb-1">
+                      Key Facts
+                    </span>
+                    <ul className="list-disc list-inside space-y-1 text-[11px] text-slate-300">
+                      {finding.facts.map((fact: string, idx: number) => (
+                        <li key={idx} className="leading-snug">{fact}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Recommended Actions */}
+                {finding.recommendedActions && finding.recommendedActions.length > 0 && (
+                  <div>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400 block mb-1">
+                      Recommended Actions
+                    </span>
+                    <ul className="space-y-1 text-[11px] text-amber-200 font-medium">
+                      {finding.recommendedActions.map((action: string, idx: number) => (
+                        <li key={idx} className="flex items-start gap-1.5 bg-amber-950/30 p-1.5 rounded border border-amber-800/30">
+                          <span className="text-amber-400 shrink-0">▸</span>
+                          <span>{action}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Correct Assumption Form */}
+                <div className="pt-2 border-t border-purple-800/40 space-y-2">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-400 block">
+                    ✏️ Correct This Assumption
+                  </span>
+                  <input
+                    type="text"
+                    value={correctionText}
+                    onChange={(e) => setCorrectionText(e.target.value)}
+                    placeholder="e.g. Node-1 runs batch jobs without logging events"
+                    className="w-full px-2.5 py-1.5 bg-slate-950 border border-purple-900/60 rounded text-xs text-slate-200 focus:outline-none focus:border-indigo-500 placeholder-slate-600"
+                  />
+                  <button
+                    onClick={handleSendFeedback}
+                    disabled={isSubmittingFeedback || !correctionText.trim()}
+                    className="w-full py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white font-medium text-[11px] rounded transition-colors"
+                  >
+                    {isSubmittingFeedback ? 'Saving Lesson...' : 'Save Lesson & Re-train'}
+                  </button>
+
+                  {feedbackSuccess && (
+                    <p className="text-[10px] text-emerald-400 font-medium text-center">
+                      ✓ Lesson saved! Re-run investigation to see adaptation.
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
           <TaskManagerSection
             selectedNode={selectedNode}
             tasks={tasks}
@@ -748,7 +932,7 @@ export default function Page() {
     isConnected,
     identity,
     addNode,
-    updateNode, // <--- ADD THIS
+    updateNode,
     updateNodeStatus,
     deleteNode,
     addTask,
@@ -775,6 +959,36 @@ export default function Page() {
   } = useCanvasPanZoom(() => setSelectedNodeId(null));
 
   const containerRef = useRef<HTMLDivElement>(null);
+  
+  const [alerts, setAlerts] = useState<any[]>([]);
+  const [isScanning, setIsScanning] = useState(false);
+
+  const handleRunOrgScan = async () => {
+    setIsScanning(true);
+    try {
+      const res = await fetch('/api/investigations/scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nodes, tasks }),
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.success) {
+        setAlerts(data.alerts);
+      }
+    } catch (err) {
+      console.error('Scan error:', err);
+    } finally {
+      setIsScanning(false);
+    }
+  };
+
+  // Run initial scan whenever node data changes
+  useEffect(() => {
+    if (nodes.length > 0) {
+      handleRunOrgScan();
+    }
+  }, [nodes.length, tasks.length]);
 
   const handleExecuteTaskWithAgent = async (
     agentNode: OrgNode,
@@ -843,12 +1057,58 @@ export default function Page() {
   const treeLayout = useMemo(() => calculateLeadTreeLayout(filteredNodes), [filteredNodes]);
   const selectedNode = useMemo(() => nodes.find((n) => n.id === selectedNodeId) || null, [nodes, selectedNodeId]);
 
+  // Agent token/cost spend per person: their own agents, and every agent in their team
+  const { records: telemetry, defaultModel, agentModels, refresh: refreshTelemetry } = useTelemetry();
+  const agentUsage = useMemo(() => usageByAgent(telemetry), [telemetry]);
+  const spendByPerson = useMemo(() => {
+    const spend = new Map<string, { own: UsageTotals; team: UsageTotals }>();
+    for (const person of nodes) {
+      if (person.type === 'Agent') continue;
+      spend.set(person.id, {
+        own: sumTotals(ownedAgents(person.id, nodes).map((a) => a.id), agentUsage),
+        team: sumTotals(teamAgentIds(person.id, nodes), agentUsage),
+      });
+    }
+    return spend;
+  }, [nodes, agentUsage]);
+
   return (
     <div className="flex h-screen w-full bg-slate-950 text-slate-100 overflow-hidden font-sans">
       <aside className="w-80 border-r border-slate-800 bg-slate-900/90 backdrop-blur flex flex-col z-20 shadow-2xl">
         <SidebarHeader isConnected={isConnected} identity={identity} />
         <MetricsBar nodes={nodes} tasks={tasks} />
-
+        {alerts.length > 0 && (
+          <div className="p-3 bg-rose-950/40 border-b border-rose-800/50 space-y-1.5">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-rose-400 flex items-center gap-1">
+                <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
+                Autonomous Alerts ({alerts.length})
+              </span>
+              <button
+                onClick={handleRunOrgScan}
+                disabled={isScanning}
+                className="text-[10px] text-slate-400 hover:text-white underline"
+              >
+                {isScanning ? 'Scanning...' : 'Rescan'}
+              </button>
+            </div>
+            <div className="space-y-1 max-h-32 overflow-y-auto">
+              {alerts.map((alert) => (
+                <div
+                  key={alert.id}
+                  onClick={() => setSelectedNodeId(alert.nodeId)}
+                  className="p-1.5 bg-slate-950/80 rounded border border-rose-900/50 cursor-pointer hover:border-rose-500 transition-colors text-xs"
+                >
+                  <div className="flex items-center justify-between text-[10px]">
+                    <span className="font-semibold text-rose-300">{alert.title}</span>
+                    <span className="font-mono text-slate-500">{alert.nodeName}</span>
+                  </div>
+                  <p className="text-[10px] text-slate-400 mt-0.5 truncate">{alert.description}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         <div className="flex-1 overflow-y-auto p-4 space-y-6">
           <div className="space-y-3">
             <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400">
@@ -949,8 +1209,8 @@ export default function Page() {
                     setSelectedNodeId(node.id);
                   }}
                   className={`interactive-card w-full cursor-pointer rounded-xl p-4 transition-all duration-200 border shadow-xl ${isSelected
-                      ? 'bg-slate-900 border-indigo-500 shadow-indigo-500/25 ring-2 ring-indigo-500/50 scale-[1.02] z-10'
-                      : 'bg-slate-900/95 border-slate-800 hover:border-slate-700 hover:bg-slate-900'
+                    ? 'bg-slate-900 border-indigo-500 shadow-indigo-500/25 ring-2 ring-indigo-500/50 scale-[1.02] z-10'
+                    : 'bg-slate-900/95 border-slate-800 hover:border-slate-700 hover:bg-slate-900'
                     }`}
                 >
                   <div className="flex items-center justify-between mb-2">
@@ -975,6 +1235,17 @@ export default function Page() {
                           <AgentDot key={agent.id} agent={agent} onSelectAgent={(id) => setSelectedNodeId(id)} />
                         ))}
                       </div>
+                    </div>
+                  )}
+
+                  {(spendByPerson.get(node.id)?.team.runs ?? 0) > 0 && (
+                    <div className="mt-2 pt-2 border-t border-slate-800/80 flex items-center justify-between">
+                      <span className="text-[10px] text-slate-400 font-semibold uppercase">Team Agent Spend</span>
+                      <span className="text-[11px] tabular-nums text-slate-300">
+                        <span className="font-semibold text-white">{formatUsd(spendByPerson.get(node.id)!.team.cost)}</span>
+                        {' · '}
+                        {formatCompact(spendByPerson.get(node.id)!.team.input + spendByPerson.get(node.id)!.team.output)} tok
+                      </span>
                     </div>
                   )}
                 </div>
@@ -1002,8 +1273,8 @@ export default function Page() {
                                 setSelectedNodeId(worker.id);
                               }}
                               className={`flex items-center justify-between p-2 rounded-lg text-xs transition-all border cursor-pointer ${isWorkerSelected
-                                  ? 'bg-indigo-950/80 border-indigo-500 text-indigo-100 font-medium ring-1 ring-indigo-500/40 shadow-md'
-                                  : 'bg-slate-900/80 border-slate-800 text-slate-300 hover:bg-slate-800 hover:border-slate-700'
+                                ? 'bg-indigo-950/80 border-indigo-500 text-indigo-100 font-medium ring-1 ring-indigo-500/40 shadow-md'
+                                : 'bg-slate-900/80 border-slate-800 text-slate-300 hover:bg-slate-800 hover:border-slate-700'
                                 }`}
                             >
                               <div className="flex items-center gap-2 truncate pr-2">
@@ -1014,6 +1285,11 @@ export default function Page() {
                               </div>
 
                               <div className="flex items-center gap-2 shrink-0 p-1.5 -my-1.5">
+                                {(spendByPerson.get(worker.id)?.own.runs ?? 0) > 0 && (
+                                  <span className="text-[10px] tabular-nums text-slate-400 mr-1">
+                                    {formatUsd(spendByPerson.get(worker.id)!.own.cost)}
+                                  </span>
+                                )}
                                 {worker.assignedAgents.length > 0 ? (
                                   worker.assignedAgents.map((agent) => (
                                     <AgentDot key={agent.id} agent={agent} onSelectAgent={(id) => setSelectedNodeId(id)} />
@@ -1049,6 +1325,10 @@ export default function Page() {
           onToggleTask={toggleTask}
           onDeleteTask={deleteTask}
           onExecuteTask={handleExecuteTaskWithAgent}
+          agentUsage={agentUsage}
+          defaultModel={defaultModel}
+          agentModels={agentModels}
+          onModelChange={refreshTelemetry}
         />
       )}
     </div>
