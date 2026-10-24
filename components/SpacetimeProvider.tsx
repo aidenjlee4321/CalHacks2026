@@ -27,15 +27,14 @@ export function SpacetimeProvider({ children }: { children: React.ReactNode }) {
         setMounted(true);
 
         const connection = DbConnection.builder()
-            .withUri('wss://maincloud.spacetimedb.com')
-            .withDatabaseName('org-backend-afa0s')
+            .withUri('https://maincloud.spacetimedb.com')
+            .withDatabaseName('org-backend-afa0s-v2') // Must match the published name from Step 1
             .onConnect((c, id) => {
                 console.log('Connected to SpacetimeDB Cloud!', id);
                 setConnected(true);
                 setIdentity(typeof id === 'string' ? id : id.toHexString());
                 setConn(c);
 
-                // Subscribe to queries
                 c.subscriptionBuilder().subscribe([
                     'SELECT * FROM org_node',
                     'SELECT * FROM task',
