@@ -3,9 +3,13 @@
 import { useEffect, useState } from 'react';
 import type { TelemetryRecord } from '@/lib/telemetryStore';
 
-// Polls the server's agent telemetry (newest first, as stored)
+// Polls the server's agent telemetry (newest first, as stored), the default model
+// for new runs, and each agent's assigned model
 export function useTelemetry(pollMs = 5000) {
     const [records, setRecords] = useState<TelemetryRecord[]>([]);
+    const [defaultModel, setDefaultModel] = useState<string | null>(null);
+    const [agentModels, setAgentModels] = useState<Record<string, string>>({});
+    const [version, setVersion] = useState(0);
 
     useEffect(() => {
         let active = true;
@@ -13,7 +17,10 @@ export function useTelemetry(pollMs = 5000) {
             fetch('/api/telemetry')
                 .then((res) => res.json())
                 .then((data) => {
-                    if (active && data.telemetry) setRecords(data.telemetry);
+                    if (!active) return;
+                    if (data.telemetry) setRecords(data.telemetry);
+                    if (data.model) setDefaultModel(data.model);
+                    if (data.agentModels) setAgentModels(data.agentModels);
                 })
                 .catch((err) => console.error('Failed to fetch telemetry:', err));
 
@@ -23,7 +30,10 @@ export function useTelemetry(pollMs = 5000) {
             active = false;
             clearInterval(interval);
         };
-    }, [pollMs]);
+    }, [pollMs, version]);
 
-    return records;
+    // Reload now instead of waiting for the next poll
+    const refresh = () => setVersion((v) => v + 1);
+
+    return { records, defaultModel, agentModels, refresh };
 }

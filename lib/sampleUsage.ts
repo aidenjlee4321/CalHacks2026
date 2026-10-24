@@ -1,4 +1,5 @@
 import { AGENT_MODEL, summarizeUsage } from '@/lib/claude';
+import { DEFAULT_AGENT_MODELS } from '@/lib/agentModels';
 import { recordTelemetry, telemetryData } from '@/lib/telemetryStore';
 
 // Simulated run history for the 4 demo agents (see lib/demoAgents.ts), tagged source 'sample'
@@ -19,7 +20,7 @@ const PROFILES: AgentProfile[] = [
     { agentId: 'node-37', agentName: 'Agent #037', task: 'Investigate production error logs', runs: 8, input: [1500, 3000], output: [600, 1500], latencyMs: [7000, 14000] },
     { agentId: 'node-38', agentName: 'Agent #038', task: 'Draft prospect follow-up emails', runs: 6, input: [300, 600], output: [200, 500], latencyMs: [3000, 6000] },
     { agentId: 'node-46', agentName: 'Agent #046', task: 'Compile weekly leadership report', runs: 5, input: [4000, 9000], output: [1500, 3500], latencyMs: [15000, 30000], failures: 1 },
-    { agentId: 'node-76', agentName: 'Agent #076', task: 'Triage incoming support tickets', runs: 12, input: [400, 900], output: [150, 400], latencyMs: [2500, 5000] },
+    { agentId: 'node-76', agentName: 'Agent #076', task: 'Triage incoming support tickets', runs: 12, input: [400, 900], output: [150, 400], latencyMs: [1200, 3000] },
 ];
 
 const HISTORY_HOURS = 6;
@@ -47,12 +48,15 @@ export function seedSampleUsage() {
     const runs = PROFILES.flatMap((p) =>
         Array.from({ length: p.runs }, (_, i) => {
             const failed = i < (p.failures || 0);
-            const usage = summarizeUsage(AGENT_MODEL, {
+            // History uses each agent's starting model, so later reassignments don't rewrite it
+            const model = DEFAULT_AGENT_MODELS[p.agentId] || AGENT_MODEL;
+            const usage = summarizeUsage(model, {
                 input_tokens: failed ? 0 : between(p.input),
                 output_tokens: failed ? 0 : between(p.output),
             });
             return {
                 profile: p,
+                model,
                 failed,
                 usage,
                 latencyMs: between(p.latencyMs),
@@ -69,7 +73,7 @@ export function seedSampleUsage() {
             agentId: run.profile.agentId,
             agentName: run.profile.agentName,
             source: 'sample',
-            model: AGENT_MODEL,
+            model: run.model,
             status: run.failed ? 'FAILED' : 'SUCCESS',
             latencyMs: run.latencyMs,
             tokens: run.usage.totalTokens,

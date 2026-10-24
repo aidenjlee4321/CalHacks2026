@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { TelemetryRecord } from '@/lib/telemetryStore';
 import { UsageRow, inputTokensOf, outputTokensOf, usageByAgent } from '@/lib/agentUsage';
+import { shortModelName } from '@/lib/agentModels';
 
 export { inputTokensOf, outputTokensOf };
 
@@ -241,6 +242,7 @@ export function TokensPerRunChart({ runs }: { runs: TelemetryRecord[] }) {
                                   { label: 'Input', value: inputTokensOf(hovered).toLocaleString(), color: 'var(--series-input)' },
                                   { label: 'Cost', value: formatUsd(hovered.costUsd) },
                                   { label: 'Latency', value: formatMs(hovered.latencyMs) },
+                                  { label: 'Model', value: shortModelName(hovered.model) },
                               ]
                     }
                 />
@@ -432,6 +434,7 @@ export function UsageBreakdownChart({ rows: allRows, label }: { rows: UsageRow[]
                         { label: 'Output', value: hovered.output.toLocaleString(), color: 'var(--series-output)' },
                         { label: 'Input', value: hovered.input.toLocaleString(), color: 'var(--series-input)' },
                         { label: 'Cost', value: formatUsd(hovered.cost) },
+                        ...(hovered.models?.length ? [{ label: 'Model', value: hovered.models.map(shortModelName).join(', ') }] : []),
                     ]}
                 />
             )}

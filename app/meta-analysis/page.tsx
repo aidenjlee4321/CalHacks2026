@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { TelemetryRecord } from '@/lib/telemetryStore';
 import { DEMO_AGENT_TASKS } from '@/lib/demoAgents';
 import { agentRuns, usageByOwner } from '@/lib/agentUsage';
+import { shortModelName } from '@/lib/agentModels';
 import { useOrgData } from '@/hooks/useOrgData';
 import {
     CumulativeCostChart,
@@ -296,6 +297,7 @@ export default function MetaAnalysisPage() {
                                             <th className="pb-3 px-2">Time</th>
                                             <th className="pb-3 px-2">Agent</th>
                                             <th className="pb-3 px-2">Status</th>
+                                            <th className="pb-3 px-2">Model</th>
                                             <th className="pb-3 px-2 text-right">Input</th>
                                             <th className="pb-3 px-2 text-right">Output</th>
                                             <th className="pb-3 px-2 text-right">Cost</th>
@@ -316,6 +318,7 @@ export default function MetaAnalysisPage() {
                                                 <td className="py-3 px-2 whitespace-nowrap">
                                                     <StatusLabel status={record.status} />
                                                 </td>
+                                                <td className="py-3 px-2 whitespace-nowrap text-slate-400">{shortModelName(record.model)}</td>
                                                 <td className="py-3 px-2 text-right tabular-nums">{inputTokensOf(record).toLocaleString()}</td>
                                                 <td className="py-3 px-2 text-right tabular-nums">{outputTokensOf(record).toLocaleString()}</td>
                                                 <td className="py-3 px-2 text-right tabular-nums">{formatUsd(record.costUsd)}</td>

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import { anthropic, AGENT_MODEL, summarizeUsage } from '@/lib/claude';
+import { anthropic, AGENT_MODEL, SUPPORTS_FALLBACKS, summarizeUsage } from '@/lib/claude';
+import { getAgentModel } from '@/lib/agentModels';
 import { recordTelemetry } from '@/lib/telemetryStore';
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -28,13 +29,18 @@ export async function POST(req: Request) {
         source,
     };
 
+    // Each agent runs on its own assigned model
+    const model = getAgentModel(agentId, AGENT_MODEL);
+
     try {
         // 2. Run the task. Server-side fallbacks retry a declined request on another model.
         const response = await anthropic.beta.messages.create({
-            model: AGENT_MODEL,
+            model,
             max_tokens: 16000,
-            betas: ['server-side-fallback-2026-07-01'],
-            fallbacks: 'default',
+            ...(SUPPORTS_FALLBACKS.has(model) && {
+                betas: ['server-side-fallback-2026-07-01'],
+                fallbacks: 'default' as const,
+            }),
             system: `You are ${agentName || 'an AI agent'}, an AI agent working inside a company org chart alongside human employees. Complete the assigned task and reply with a concise work report.`,
             messages: [
                 { role: 'user', content: prompt || 'Execute the assigned task efficiently.' },
@@ -78,7 +84,7 @@ export async function POST(req: Request) {
         console.error('Claude API Error:', error);
         recordTelemetry({
             ...base,
-            model: AGENT_MODEL,
+            model,
             status: 'FAILED',
             latencyMs: Date.now() - startTime,
             tokens: 0,

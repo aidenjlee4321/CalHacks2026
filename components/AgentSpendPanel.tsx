@@ -1,7 +1,8 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import type { OrgNode } from '@/hooks/useOrgData';
+import { AVAILABLE_MODELS, shortModelName } from '@/lib/agentModels';
 import { UsageRow, UsageTotals, ownedAgents, sumTotals, teamAgentIds } from '@/lib/agentUsage';
 import { formatCompact, formatMs, formatUsd } from '@/components/UsageCharts';
 
@@ -39,18 +40,63 @@ export default function AgentSpendPanel({
     node,
     nodes,
     byAgent,
+    defaultModel,
+    agentModels,
+    onModelChange,
 }: {
     node: OrgNode;
     nodes: OrgNode[];
     byAgent: Map<string, UsageRow>;
+    defaultModel?: string | null;
+    agentModels: Record<string, string>;
+    onModelChange: () => void;
 }) {
-    // An agent: its own usage
+    const [savingModel, setSavingModel] = useState(false);
+    const assignedModel = (id: string) => agentModels[id] || defaultModel || '';
+
+    const changeModel = async (model: string) => {
+        setSavingModel(true);
+        try {
+            await fetch('/api/agent/model', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ agentId: node.id, model }),
+            });
+            onModelChange();
+        } finally {
+            setSavingModel(false);
+        }
+    };
+
+    // An agent: its model and its own usage
     if (node.type === 'Agent') {
         const own = byAgent.get(node.id);
         const succeeded = own ? own.runs - own.failed : 0;
+        const assigned = assignedModel(node.id);
+        const pastModels = (own?.models || []).filter((m) => m !== assigned);
         return (
             <div className="border-t border-slate-800 pt-4 space-y-2">
                 <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">AI Usage</h3>
+                <div>
+                    <label htmlFor="agent-model" className="text-xs text-slate-500 uppercase block">Model</label>
+                    <select
+                        id="agent-model"
+                        value={assigned}
+                        disabled={savingModel || !assigned}
+                        onChange={(e) => changeModel(e.target.value)}
+                        className="mt-1 w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-xs font-mono text-slate-200 disabled:opacity-60"
+                    >
+                        {AVAILABLE_MODELS.map((m) => (
+                            <option key={m} value={m}>
+                                {shortModelName(m)} ({m})
+                            </option>
+                        ))}
+                    </select>
+                    <p className="mt-1 text-[10px] text-slate-500">
+                        Used for this agent&apos;s next runs.
+                        {pastModels.length > 0 && ` Earlier runs also used: ${pastModels.map(shortModelName).join(', ')}.`}
+                    </p>
+                </div>
                 {!own ? (
                     <p className="text-xs text-slate-500 italic">No runs recorded for this agent yet.</p>
                 ) : (
@@ -94,7 +140,12 @@ export default function AgentSpendPanel({
                     {direct.map((row) => (
                         <div key={row.key} className="space-y-1">
                             <div className="flex justify-between text-[11px]">
-                                <span className="text-slate-300">{row.name}</span>
+                                <span className="text-slate-300">
+                                    {row.name}
+                                    {assignedModel(row.key) && (
+                                        <span className="ml-1.5 text-[10px] text-slate-500">{shortModelName(assignedModel(row.key))}</span>
+                                    )}
+                                </span>
                                 <span className="tabular-nums text-slate-400">
                                     {row.runs ? `${formatCompact(row.input + row.output)} · ${formatUsd(row.cost)}` : 'no runs'}
                                 </span>

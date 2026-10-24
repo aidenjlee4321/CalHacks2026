@@ -671,11 +671,17 @@ function NodeInspector({
   onDeleteTask,
   onExecuteTask,
   agentUsage,
+  defaultModel,
+  agentModels,
+  onModelChange,
 }: {
   selectedNode: OrgNode;
   nodes: OrgNode[];
   tasks: TaskItem[];
   agentUsage: Map<string, UsageRow>;
+  defaultModel: string | null;
+  agentModels: Record<string, string>;
+  onModelChange: () => void;
   runningTaskId?: string | null;
   agentResult?: string | null;
   onClose: () => void;
@@ -774,7 +780,14 @@ function NodeInspector({
             </div>
           </div>
 
-          <AgentSpendPanel node={selectedNode} nodes={nodes} byAgent={agentUsage} />
+          <AgentSpendPanel
+            node={selectedNode}
+            nodes={nodes}
+            byAgent={agentUsage}
+            defaultModel={defaultModel}
+            agentModels={agentModels}
+            onModelChange={onModelChange}
+          />
 
           {/* Investigator Action & Findings Panel */}
           <div className="border-t border-slate-800 pt-4 space-y-3">
@@ -937,7 +950,7 @@ export default function Page() {
   const selectedNode = useMemo(() => nodes.find((n) => n.id === selectedNodeId) || null, [nodes, selectedNodeId]);
 
   // Agent token/cost spend per person: their own agents, and every agent in their team
-  const telemetry = useTelemetry();
+  const { records: telemetry, defaultModel, agentModels, refresh: refreshTelemetry } = useTelemetry();
   const agentUsage = useMemo(() => usageByAgent(telemetry), [telemetry]);
   const spendByPerson = useMemo(() => {
     const spend = new Map<string, { own: UsageTotals; team: UsageTotals }>();
@@ -1174,6 +1187,9 @@ export default function Page() {
           onDeleteTask={deleteTask}
           onExecuteTask={handleExecuteTaskWithAgent}
           agentUsage={agentUsage}
+          defaultModel={defaultModel}
+          agentModels={agentModels}
+          onModelChange={refreshTelemetry}
         />
       )}
     </div>

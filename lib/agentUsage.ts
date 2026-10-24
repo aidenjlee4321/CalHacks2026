@@ -15,6 +15,9 @@ export interface UsageTotals {
 export interface UsageRow extends UsageTotals {
     key: string;
     name: string;
+    model?: string; // model that served the most recent run
+    models?: string[]; // every model that has served a run
+    lastRunAt?: number;
 }
 
 export const emptyTotals = (): UsageTotals => ({ input: 0, output: 0, cost: 0, runs: 0, failed: 0, latencyMs: 0 });
@@ -59,8 +62,16 @@ export function usageByAgent(records: TelemetryRecord[]): Map<string, UsageRow> 
     const byAgent = new Map<string, UsageRow>();
     for (const r of agentRuns(records)) {
         const key = r.agentId || r.agentName || 'unknown';
-        const row = byAgent.get(key) || { key, name: r.agentName || key, ...emptyTotals() };
+        const row = byAgent.get(key) || { key, name: r.agentName || key, ...emptyTotals(), models: [] };
         addRun(row, r);
+        if (r.model) {
+            if (!row.models!.includes(r.model)) row.models!.push(r.model);
+            const at = Number(r.timestamp);
+            if (row.lastRunAt === undefined || at >= row.lastRunAt) {
+                row.lastRunAt = at;
+                row.model = r.model;
+            }
+        }
         byAgent.set(key, row);
     }
     return byAgent;

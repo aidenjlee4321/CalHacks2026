@@ -10,9 +10,13 @@ export const AGENT_MODEL = process.env.ANTHROPIC_MODEL || 'claude-opus-5-5';
 const PRICING: Record<string, { input: number; output: number; cacheRead: number }> = {
     'claude-opus-5-5': { input: 4, output: 20, cacheRead: 0.2 },
     'claude-sonnet-5-5': { input: 2, output: 10, cacheRead: 0.2 },
+    'claude-haiku-5-5': { input: 0.1, output: 0.5, cacheRead: 0.01 }, // prompts up to 100K tokens
     'claude-opus-5': { input: 5, output: 25, cacheRead: 0.5 },
     'claude-opus-4-8': { input: 5, output: 25, cacheRead: 0.5 },
 };
+
+// Models that accept server-side refusal fallbacks (Haiku has none)
+export const SUPPORTS_FALLBACKS = new Set(['claude-opus-5-5', 'claude-sonnet-5-5']);
 
 export interface UsageSummary {
     inputTokens: number;
