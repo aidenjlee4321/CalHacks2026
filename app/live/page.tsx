@@ -3,6 +3,7 @@ import LiveOrgChart from '../../components/LiveOrgChart';
 import HumanInbox from '../../components/HumanInbox';
 import DemoControls from '../../components/DemoControls';
 import LiveActivityFeed from '../../components/LiveActivityFeed';
+import ResearchPanel from '../../components/ResearchPanel';
 
 export default function LivePage() {
   return (
@@ -10,6 +11,7 @@ export default function LivePage() {
       <h1 className="mb-6 text-2xl font-bold">Hybrid Org-Chart (live on SpacetimeDB)</h1>
       <SpacetimeProvider>
         <DemoControls />
+        <ResearchPanel />
         <div className="flex gap-6">
           <div className="flex-1 overflow-x-auto">
             <LiveOrgChart />

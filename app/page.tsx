@@ -472,7 +472,6 @@ function AgentDot({
   agent: OrgNode;
   onSelectAgent: (id: string) => void;
 }) {
-  const [showTooltip, setShowTooltip] = useState(false);
   const colors = getStatusColor(agent.status);
 
   return (
@@ -482,23 +481,9 @@ function AgentDot({
           e.stopPropagation();
           onSelectAgent(agent.id);
         }}
-        onMouseEnter={() => setShowTooltip(true)}
-        onMouseLeave={() => setShowTooltip(false)}
-        className={`w-3.5 h-3.5 rounded-full border ${colors.dot} hover:scale-125 transition-transform cursor-pointer shadow-sm`}
-        title={agent.name}
+        aria-label={agent.name}
+        className={`w-3.5 h-3.5 rounded-full border ${colors.dot} cursor-pointer shadow-sm transition-all duration-200 ease-out hover:scale-125 hover:ring-2 hover:ring-indigo-400/80 hover:ring-offset-2 hover:ring-offset-slate-900 hover:shadow-[0_0_12px_rgba(129,140,248,0.7)] active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400`}
       />
-      {showTooltip && (
-        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-30 w-36 bg-slate-900 border border-slate-700 rounded-lg p-2 shadow-2xl text-left pointer-events-none">
-          <div className="flex items-center justify-between text-[9px] font-bold uppercase text-slate-400 mb-0.5">
-            <span>Agent</span>
-            <span className={`font-mono ${colors.text}`}>{agent.status || 'Idle'}</span>
-          </div>
-          <div className="text-xs font-semibold text-white truncate">{agent.name}</div>
-          <div className="text-[9px] font-mono text-slate-400 truncate mt-0.5">
-            ID: {agent.id.slice(0, 10)}...
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -985,7 +970,7 @@ export default function Page() {
                       <span className="text-[10px] text-purple-400 font-semibold uppercase">
                         Lead Agents ({node.assignedAgents.length})
                       </span>
-                      <div className="flex items-center gap-1.5 overflow-x-auto max-w-[200px]">
+                      <div className="flex items-center gap-2 overflow-x-auto max-w-[200px] p-1.5 -m-1.5">
                         {node.assignedAgents.map((agent) => (
                           <AgentDot key={agent.id} agent={agent} onSelectAgent={(id) => setSelectedNodeId(id)} />
                         ))}
@@ -1028,7 +1013,7 @@ export default function Page() {
                                 </span>
                               </div>
 
-                              <div className="flex items-center gap-1 shrink-0">
+                              <div className="flex items-center gap-2 shrink-0 p-1.5 -my-1.5">
                                 {worker.assignedAgents.length > 0 ? (
                                   worker.assignedAgents.map((agent) => (
                                     <AgentDot key={agent.id} agent={agent} onSelectAgent={(id) => setSelectedNodeId(id)} />

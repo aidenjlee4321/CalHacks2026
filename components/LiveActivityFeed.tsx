@@ -9,6 +9,7 @@ const KIND: Record<string, { icon: string; color: string }> = {
   ACTION: { icon: '✅', color: 'text-green-700' },
   REASONING: { icon: '🧠', color: 'text-purple-700' },
   HUMAN: { icon: '👤', color: 'text-amber-700' },
+  WEB: { icon: '🌐', color: 'text-orange-700' },
 };
 
 export default function LiveActivityFeed() {
