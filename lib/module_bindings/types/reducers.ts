@@ -7,7 +7,6 @@ import { type Infer as __Infer } from "spacetimedb";
 
 // Import all reducer arg schemas
 import AddNodeReducer from "../add_node_reducer";
-
 import AssignTaskReducer from "../assign_task_reducer";
 import CompleteTaskReducer from "../complete_task_reducer";
 import LogActivityReducer from "../log_activity_reducer";

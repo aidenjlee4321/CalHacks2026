@@ -1,4 +1,4 @@
-import SpacetimeProvider from '../../components/SpacetimeProvider';
+import SpacetimeProvider from '../../components/LiveSpacetimeProvider';
 import LiveOrgChart from '../../components/LiveOrgChart';
 import HumanInbox from '../../components/HumanInbox';
 
