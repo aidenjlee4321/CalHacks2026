@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useRef, createContext, useContext } from 'react';
+import Link from 'next/link';
 
 // ============================================================================
 // 1. TYPES & DATA MODELS
@@ -113,7 +114,7 @@ const createBaseDataset = () => {
       id: `node-${i}`,
       name: `Worker #${String(i).padStart(3, '0')}`,
       type: 'Worker',
-      status: statuses[i % statuses.length],
+      status: 'Idle',
       superior: assignedLead,
     });
   }
@@ -129,7 +130,7 @@ const createBaseDataset = () => {
       id: `node-${i}`,
       name: `Agent #${String(i).padStart(3, '0')}`,
       type: 'Agent',
-      status: statuses[i % statuses.length],
+      status: 'Idle',
       superior: superiorId,
     });
   }
@@ -481,25 +482,29 @@ function useOrgData() {
     }
   };
 
-  const addTask = (assignedNodeId: string, title: string) => {
-    if (!assignedNodeId || !title.trim()) return;
-    const newTaskId = crypto.randomUUID();
+  const addTask = (nodeId: string, title: string) => {
+    const newTask: TaskItem = {
+      id: crypto.randomUUID(),
+      assignedNodeId: nodeId,
+      title,
+      completed: false, // MUST be explicitly false
+    };
 
+    // If using SpacetimeDB reducer:
     if (spacetime.conn && spacetime.conn.reducers?.addTask) {
       try {
         spacetime.conn.reducers.addTask({
-          id: newTaskId,
-          assignedNodeId,
-          title: title.trim(),
+          id: newTask.id,
+          assignedNodeId: nodeId,
+          title,
+          completed: false,
         });
       } catch (err) {
-        console.error('🚨 Error adding task via reducer:', err);
+        console.error('Error adding task via reducer:', err);
       }
     } else {
-      setDemoTasks((prev) => [
-        ...prev,
-        { id: newTaskId, assignedNodeId, title: title.trim(), completed: false },
-      ]);
+      // Local state fallback
+      setDemoTasks((prev) => [...prev, newTask]);
     }
   };
 
@@ -528,6 +533,19 @@ function useOrgData() {
       );
     }
   };
+  const updateNodeStatus = (id: string, status: string) => {
+    if (spacetime.conn && spacetime.conn.reducers?.updateNodeStatus) {
+      try {
+        spacetime.conn.reducers.updateNodeStatus({ id, status });
+      } catch (err) {
+        console.error('🚨 Error updating node status via reducer:', err);
+      }
+    } else {
+      setDemoNodes((prev) =>
+        prev.map((n) => (n.id === id ? { ...n, status } : n))
+      );
+    }
+  };
 
   return {
     nodes,
@@ -536,6 +554,7 @@ function useOrgData() {
     identity,
     addNode,
     updateNode,
+    updateNodeStatus,
     deleteNode,
     addTask,
     deleteTask,
@@ -550,20 +569,32 @@ function useOrgData() {
 function SidebarHeader({ isConnected, identity }: { isConnected: boolean; identity: string | null }) {
   return (
     <>
-      <header className="p-4 border-b border-slate-800 flex items-center justify-between">
-        <div>
-          <h1 className="font-bold text-lg text-white tracking-wide">Spacetime Org</h1>
-          <p className="text-xs text-slate-400">Lead • Worker • Agent Tree</p>
+      <header className="p-4 border-b border-slate-800 space-y-3">
+        {/* Top Row: Title & Live Status */}
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="font-bold text-lg text-white tracking-wide">Spacetime Org</h1>
+            <p className="text-xs text-slate-400">Lead • Worker • Agent Tree</p>
+          </div>
+          <div className="flex items-center gap-2 bg-slate-950/50 px-2.5 py-1 rounded-full border border-slate-800">
+            <span
+              className={`w-2 h-2 rounded-full ${isConnected ? 'bg-emerald-500 shadow-sm shadow-emerald-500/50' : 'bg-rose-500'
+                }`}
+            />
+            <span className="text-[11px] font-semibold tracking-wider text-slate-300">
+              {isConnected ? 'Live' : 'Offline'}
+            </span>
+          </div>
         </div>
-        <div className="flex items-center gap-2 bg-slate-950/50 px-2.5 py-1 rounded-full border border-slate-800">
-          <span
-            className={`w-2 h-2 rounded-full ${isConnected ? 'bg-emerald-500 shadow-sm shadow-emerald-500/50' : 'bg-rose-500'
-              }`}
-          />
-          <span className="text-[11px] font-semibold tracking-wider text-slate-300">
-            {isConnected ? 'Live' : 'Offline'}
-          </span>
-        </div>
+
+        {/* Full-width Navigation Action */}
+        <Link
+          href="/meta-analysis"
+          className="flex items-center justify-between w-full text-xs font-medium px-3 py-2 rounded-lg bg-indigo-950/40 text-indigo-300 border border-indigo-500/30 hover:bg-indigo-900/50 hover:border-indigo-500/50 transition-all group"
+        >
+          <span>Meta Analysis Dashboard</span>
+          <span className="text-indigo-400 group-hover:translate-x-0.5 transition-transform">→</span>
+        </Link>
       </header>
 
       {identity && (
@@ -631,6 +662,7 @@ function AddNodeForm({
       return false;
     });
   }, [nodes, nodeType]);
+
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -747,6 +779,36 @@ function CanvasToolbar({
   );
 }
 
+export function getStatusColor(status?: string) {
+  switch (status?.toLowerCase()) {
+    case 'active':
+      return {
+        dot: 'bg-emerald-400 border-emerald-300 shadow-emerald-400/50',
+        text: 'text-emerald-400',
+        badge: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30',
+      };
+    case 'busy':
+      return {
+        dot: 'bg-amber-400 border-amber-300 shadow-amber-400/50',
+        text: 'text-amber-400',
+        badge: 'bg-amber-500/10 text-amber-400 border-amber-500/30',
+      };
+    case 'offline':
+      return {
+        dot: 'bg-rose-500 border-rose-400 shadow-rose-500/50',
+        text: 'text-rose-400',
+        badge: 'bg-rose-500/10 text-rose-400 border-rose-500/30',
+      };
+    case 'idle':
+    default:
+      return {
+        dot: 'bg-slate-400 border-slate-300 shadow-slate-400/50',
+        text: 'text-slate-400',
+        badge: 'bg-slate-500/10 text-slate-400 border-slate-500/30',
+      };
+  }
+}
+
 // Hoverable Agent Dot Component
 function AgentDot({
   agent,
@@ -756,13 +818,7 @@ function AgentDot({
   onSelectAgent: (id: string) => void;
 }) {
   const [showTooltip, setShowTooltip] = useState(false);
-
-  const statusColor =
-    agent.status === 'Active'
-      ? 'bg-emerald-400 border-emerald-300 shadow-emerald-400/50'
-      : agent.status === 'Busy'
-        ? 'bg-amber-400 border-amber-300 shadow-amber-400/50'
-        : 'bg-purple-400 border-purple-300 shadow-purple-400/50';
+  const colors = getStatusColor(agent.status);
 
   return (
     <div className="relative inline-block">
@@ -773,16 +829,16 @@ function AgentDot({
         }}
         onMouseEnter={() => setShowTooltip(true)}
         onMouseLeave={() => setShowTooltip(false)}
-        className={`w-3.5 h-3.5 rounded-full border ${statusColor} hover:scale-125 transition-transform cursor-pointer shadow-sm`}
+        className={`w-3.5 h-3.5 rounded-full border ${colors.dot} hover:scale-125 transition-transform cursor-pointer shadow-sm`}
         title={agent.name}
       />
 
       {/* Hover Tooltip */}
       {showTooltip && (
-        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-30 w-36 bg-slate-900 border border-purple-500/40 rounded-lg p-2 shadow-2xl text-left pointer-events-none">
-          <div className="flex items-center justify-between text-[9px] font-bold uppercase text-purple-400 mb-0.5">
+        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-30 w-36 bg-slate-900 border border-slate-700 rounded-lg p-2 shadow-2xl text-left pointer-events-none">
+          <div className="flex items-center justify-between text-[9px] font-bold uppercase text-slate-400 mb-0.5">
             <span>Agent</span>
-            <span className="font-mono text-slate-400">{agent.status || 'Idle'}</span>
+            <span className={`font-mono ${colors.text}`}>{agent.status || 'Idle'}</span>
           </div>
           <div className="text-xs font-semibold text-white truncate">{agent.name}</div>
           <div className="text-[9px] font-mono text-slate-400 truncate mt-0.5">
@@ -795,30 +851,40 @@ function AgentDot({
 }
 
 function TaskManagerSection({
-  selectedNodeId,
+  selectedNode,
   tasks,
+  runningTaskId,
+  agentResult,
   onAddTask,
   onToggleTask,
   onDeleteTask,
+  onExecuteTask,
 }: {
-  selectedNodeId: string;
+  selectedNode: OrgNode | null;
   tasks: TaskItem[];
+  runningTaskId?: string | null;
+  agentResult?: string | null;
   onAddTask: (nodeId: string, title: string) => void;
   onToggleTask: (id: string) => void;
   onDeleteTask: (id: string) => void;
+  onExecuteTask: (agentNode: OrgNode, task: TaskItem, delaySeconds: number) => void;
 }) {
   const [newTaskTitle, setNewTaskTitle] = useState('');
+  const [delaySeconds, setDelaySeconds] = useState<number>(5); // Default 5 seconds delay
 
   const selectedNodeTasks = useMemo(() => {
-    return tasks.filter((t) => t.assignedNodeId === selectedNodeId);
-  }, [tasks, selectedNodeId]);
+    if (!selectedNode?.id) return [];
+    return tasks.filter((t) => t.assignedNodeId === selectedNode.id);
+  }, [tasks, selectedNode?.id]);
 
   const handleCreateTask = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newTaskTitle.trim()) return;
-    onAddTask(selectedNodeId, newTaskTitle);
+    if (!newTaskTitle.trim() || !selectedNode?.id) return;
+    onAddTask(selectedNode.id, newTaskTitle);
     setNewTaskTitle('');
   };
+
+  if (!selectedNode) return null;
 
   return (
     <div className="border-t border-slate-800 pt-4 space-y-3">
@@ -826,6 +892,24 @@ function TaskManagerSection({
         <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">
           Assigned Tasks ({selectedNodeTasks.length})
         </h3>
+
+        {/* DELAY INPUT FIELD */}
+        {selectedNode?.type?.toLowerCase() === 'agent' && (
+          <div className="flex items-center gap-1.5 bg-slate-950 px-2 py-1 rounded border border-slate-800">
+            <label htmlFor="delay-sec" className="text-[10px] font-mono text-slate-400 uppercase">
+              Delay (s):
+            </label>
+            <input
+              id="delay-sec"
+              type="number"
+              min="0"
+              max="60"
+              value={delaySeconds}
+              onChange={(e) => setDelaySeconds(Math.max(0, parseInt(e.target.value) || 0))}
+              className="w-10 text-center bg-slate-900 border border-slate-700 rounded text-xs font-mono text-amber-300 focus:outline-none focus:border-indigo-500"
+            />
+          </div>
+        )}
       </div>
 
       <form onSubmit={handleCreateTask} className="flex gap-2">
@@ -855,32 +939,64 @@ function TaskManagerSection({
             >
               <div
                 onClick={() => onToggleTask(task.id)}
-                className="flex items-start gap-2.5 cursor-pointer flex-1"
+                className="flex items-start gap-2.5 cursor-pointer flex-1 overflow-hidden"
               >
                 <input
                   type="checkbox"
                   checked={task.completed}
                   onChange={() => { }}
-                  className="mt-0.5 rounded border-slate-700 text-indigo-600 focus:ring-0"
+                  className="mt-0.5 rounded border-slate-700 text-indigo-600 focus:ring-0 shrink-0"
                 />
                 <span
-                  className={`text-xs ${task.completed ? 'line-through text-slate-500' : 'text-slate-200'
-                    }`}
+                  className={`text-xs truncate block ${task.completed ? 'line-through text-slate-500' : 'text-slate-200'}`}
                 >
                   {task.title}
                 </span>
               </div>
-              <button
-                onClick={() => onDeleteTask(task.id)}
-                className="text-slate-500 hover:text-rose-400 text-xs px-1 font-bold"
-                title="Delete Task"
-              >
-                ✕
-              </button>
+
+              <div className="flex items-center gap-1.5 shrink-0">
+                {/* RUN AGENT BUTTON */}
+                {selectedNode?.type?.toLowerCase() === 'agent' && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onExecuteTask(selectedNode, task, delaySeconds);
+                    }}
+                    disabled={runningTaskId !== null && runningTaskId !== undefined}
+                    className="px-2 py-1 text-[10px] font-semibold rounded bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-50 transition-colors flex items-center gap-1"
+                  >
+                    {runningTaskId === task.id ? (
+                      <><span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" /> Running...</>
+                    ) : task.completed ? (
+                      <>🔄 Re-run Agent</>
+                    ) : (
+                      <>⚡ Run Agent</>
+                    )}
+                  </button>
+                )}
+                <button
+                  onClick={() => onDeleteTask(task.id)}
+                  className="text-slate-500 hover:text-rose-400 text-xs px-1 font-bold"
+                  title="Delete Task"
+                >
+                  ✕
+                </button>
+              </div>
             </div>
           ))
         )}
       </div>
+
+      {agentResult && (
+        <div className="mt-3 p-3 bg-indigo-950/40 border border-indigo-800/50 rounded-lg space-y-1">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-400 block">
+            ⚡ Agent Output
+          </span>
+          <p className="text-xs text-slate-200 whitespace-pre-wrap leading-relaxed">
+            {agentResult}
+          </p>
+        </div>
+      )}
     </div>
   );
 }
@@ -1005,22 +1121,28 @@ function NodeInspector({
   selectedNode,
   nodes,
   tasks,
+  runningTaskId,
+  agentResult,
   onClose,
   onUpdateNode,
   onDeleteNode,
   onAddTask,
   onToggleTask,
   onDeleteTask,
+  onExecuteTask,
 }: {
   selectedNode: OrgNode;
   nodes: OrgNode[];
   tasks: TaskItem[];
+  runningTaskId?: string | null;
+  agentResult?: string | null;
   onClose: () => void;
   onUpdateNode: (id: string, name: string, type: string, superiorId: string) => void;
   onDeleteNode: (id: string) => void;
   onAddTask: (nodeId: string, title: string) => void;
   onToggleTask: (id: string) => void;
   onDeleteTask: (id: string) => void;
+  onExecuteTask: (agentNode: OrgNode, task: TaskItem, delaySeconds: number) => void;
 }) {
   const [isEditing, setIsEditing] = useState(false);
 
@@ -1072,18 +1194,18 @@ function NodeInspector({
             <div className="p-4 bg-slate-950 rounded-xl border border-slate-800">
               <span
                 className={`text-xs font-bold uppercase px-2 py-0.5 rounded border inline-block mb-1 ${selectedNode.type === 'Lead'
-                    ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
-                    : selectedNode.type === 'Worker'
-                      ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/30'
-                      : 'bg-purple-500/10 text-purple-400 border-purple-500/30'
+                  ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                  : selectedNode.type === 'Worker'
+                    ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/30'
+                    : 'bg-purple-500/10 text-purple-400 border-purple-500/30'
                   }`}
               >
                 {selectedNode.type}
               </span>
               <h3 className="text-lg font-bold text-white mt-1">{selectedNode.name}</h3>
-              <span className="inline-block mt-2 text-xs font-mono px-2 py-0.5 bg-slate-800/80 rounded text-slate-300 border border-slate-700">
-                Status: {selectedNode.status || 'Idle'}
-              </span>
+                <span className={`inline-block mt-2 text-xs font-mono px-2 py-0.5 rounded border ${getStatusColor(selectedNode.status).badge}`}>
+                  Status: {selectedNode.status || 'Idle'}
+                </span>
             </div>
 
             <div className="space-y-3 text-sm">
@@ -1109,11 +1231,14 @@ function NodeInspector({
             </div>
 
             <TaskManagerSection
-              selectedNodeId={selectedNode.id}
+              selectedNode={selectedNode}
               tasks={tasks}
+              runningTaskId={runningTaskId}
+              agentResult={agentResult}
               onAddTask={onAddTask}
               onToggleTask={onToggleTask}
               onDeleteTask={onDeleteTask}
+              onExecuteTask={onExecuteTask}
             />
           </div>
         )}
@@ -1130,322 +1255,354 @@ function NodeInspector({
 // 6. MAIN PAGE COMPONENT
 // ============================================================================
 
-export default function Page() {
-  const {
-    nodes,
-    tasks,
-    isConnected,
-    identity,
-    addNode,
-    updateNode,
-    deleteNode,
-    addTask,
-    deleteTask,
-    toggleTask,
-  } = useOrgData();
+  export default function Page() {
+    const {
+      nodes,
+      tasks,
+      isConnected,
+      identity,
+      addNode,
+      updateNode,
+      updateNodeStatus, 
+      deleteNode,
+      addTask,
+      deleteTask,
+      toggleTask,
+    } = useOrgData();
 
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>('node-1');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [filterType, setFilterType] = useState('ALL');
+    // Add the API Execution handler
+    const [runningTaskId, setRunningTaskId] = useState<string | null>(null);
+    const [agentResult, setAgentResult] = useState<string | null>(null);
 
-  const {
-    zoom,
-    setZoom,
-    pan,
-    isDragging,
-    handleMouseDown,
-    handleMouseMove,
-    handleMouseUp,
-    handleWheel,
-    resetView,
-  } = useCanvasPanZoom(() => setSelectedNodeId(null));
+    const handleExecuteTaskWithAgent = async (
+      agentNode: OrgNode,
+      task: TaskItem,
+      delaySeconds: number = 0
+    ) => {
+      setRunningTaskId(task.id);
+      updateNodeStatus(agentNode.id, 'Busy');
+      setAgentResult(null);
 
-  const containerRef = useRef<HTMLDivElement>(null);
+      try {
+        const res = await fetch('/api/agent/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            agentId: agentNode.id,
+            agentName: agentNode.name,
+            prompt: task.title,
+            delaySeconds, // Send delay to backend
+          }),
+        });
 
-  // Filter nodes while preserving parent hierarchy context
-  const filteredNodes = useMemo(() => {
-    const matchedNodeIds = new Set<string>();
+        const data = await res.json();
 
-    nodes.forEach((n) => {
-      if (n.type === 'System') return;
-      const matchesSearch =
-        !searchQuery ||
-        n.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        n.id.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesType = filterType === 'ALL' || n.type === filterType;
-
-      if (matchesSearch && matchesType) {
-        matchedNodeIds.add(n.id);
-        let sup = parseSuperior(n);
-        while (sup) {
-          matchedNodeIds.add(sup);
-          const parentNode = nodes.find((item) => item.id === sup);
-          sup = parentNode ? parseSuperior(parentNode) : null;
+        if (data.success) {
+          setAgentResult(data.resultText);
+          if (!task.completed) {
+            toggleTask(task.id);
+          }
+        } else {
+          console.error('Agent Execution Error:', data.error);
         }
+      } catch (error) {
+        console.error('Network Error:', error);
+      } finally {
+        setRunningTaskId(null);
+        updateNodeStatus(agentNode.id, 'Idle');
       }
-    });
+    };
 
-    return nodes.filter((n) => matchedNodeIds.has(n.id));
-  }, [nodes, searchQuery, filterType]);
+    const [selectedNodeId, setSelectedNodeId] = useState<string | null>('node-1');
+    const [searchQuery, setSearchQuery] = useState('');
+    const [filterType, setFilterType] = useState('ALL');
 
-  const treeLayout = useMemo(() => {
-    return calculateLeadTreeLayout(filteredNodes);
-  }, [filteredNodes]);
+    const {
+      zoom,
+      setZoom,
+      pan,
+      isDragging,
+      handleMouseDown,
+      handleMouseMove,
+      handleMouseUp,
+      handleWheel,
+      resetView,
+    } = useCanvasPanZoom(() => setSelectedNodeId(null));
 
-  const selectedNode = useMemo(() => {
-    return nodes.find((n) => n.id === selectedNodeId) || null;
-  }, [nodes, selectedNodeId]);
+    const containerRef = useRef<HTMLDivElement>(null);
 
-  return (
-    <div className="flex h-screen w-full bg-slate-950 text-slate-100 overflow-hidden font-sans">
-      {/* Sidebar Controls Panel */}
-      <aside className="w-80 border-r border-slate-800 bg-slate-900/90 backdrop-blur flex flex-col z-20 shadow-2xl">
-        <SidebarHeader isConnected={isConnected} identity={identity} />
-        <MetricsBar nodes={nodes} tasks={tasks} />
+    // Filter nodes while preserving parent hierarchy context
+    const filteredNodes = useMemo(() => {
+      const matchedNodeIds = new Set<string>();
 
-        <div className="flex-1 overflow-y-auto p-4 space-y-6">
-          {/* Search & Filters */}
-          <div className="space-y-3">
-            <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400">
-              Search & Filter
-            </h2>
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search by name or ID..."
-              className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
-            />
+      nodes.forEach((n) => {
+        if (n.type === 'System') return;
+        const matchesSearch =
+          !searchQuery ||
+          n.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          n.id.toLowerCase().includes(searchQuery.toLowerCase());
+        const matchesType = filterType === 'ALL' || n.type === filterType;
 
-            <div className="grid grid-cols-4 gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800 text-xs">
-              {['ALL', 'Lead', 'Worker', 'Agent'].map((type) => (
-                <button
-                  key={type}
-                  onClick={() => setFilterType(type)}
-                  className={`py-1 rounded font-medium transition-all ${filterType === type
+        if (matchesSearch && matchesType) {
+          matchedNodeIds.add(n.id);
+          let sup = parseSuperior(n);
+          while (sup) {
+            matchedNodeIds.add(sup);
+            const parentNode = nodes.find((item) => item.id === sup);
+            sup = parentNode ? parseSuperior(parentNode) : null;
+          }
+        }
+      });
+
+      return nodes.filter((n) => matchedNodeIds.has(n.id));
+    }, [nodes, searchQuery, filterType]);
+
+    const treeLayout = useMemo(() => {
+      return calculateLeadTreeLayout(filteredNodes);
+    }, [filteredNodes]);
+
+    const selectedNode = useMemo(() => {
+      return nodes.find((n) => n.id === selectedNodeId) || null;
+    }, [nodes, selectedNodeId]);
+
+    return (
+      <div className="flex h-screen w-full bg-slate-950 text-slate-100 overflow-hidden font-sans">
+        {/* Sidebar Controls Panel */}
+        <aside className="w-80 border-r border-slate-800 bg-slate-900/90 backdrop-blur flex flex-col z-20 shadow-2xl">
+          <SidebarHeader isConnected={isConnected} identity={identity} />
+          <MetricsBar nodes={nodes} tasks={tasks} />
+
+          <div className="flex-1 overflow-y-auto p-4 space-y-6">
+            {/* Search & Filters */}
+            <div className="space-y-3">
+              <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                Search & Filter
+              </h2>
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search by name or ID..."
+                className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
+              />
+
+              <div className="grid grid-cols-4 gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800 text-xs">
+                {['ALL', 'Lead', 'Worker', 'Agent'].map((type) => (
+                  <button
+                    key={type}
+                    onClick={() => setFilterType(type)}
+                    className={`py-1 rounded font-medium transition-all ${filterType === type
                       ? 'bg-indigo-600 text-white shadow'
                       : 'text-slate-400 hover:text-slate-200'
-                    }`}
-                >
-                  {type}
-                </button>
-              ))}
+                      }`}
+                  >
+                    {type}
+                  </button>
+                ))}
+              </div>
             </div>
+
+            <AddNodeForm
+              nodes={nodes}
+              onAddNode={addNode}
+              onSelectNode={(id) => setSelectedNodeId(id)}
+            />
           </div>
+        </aside>
 
-          <AddNodeForm
-            nodes={nodes}
-            onAddNode={addNode}
-            onSelectNode={(id) => setSelectedNodeId(id)}
-          />
-        </div>
-      </aside>
-
-      {/* Main Interactive Canvas */}
-      <main
-        ref={containerRef}
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onWheel={handleWheel}
-        className="flex-1 relative cursor-grab active:cursor-grabbing bg-slate-950 overflow-hidden select-none"
-      >
-        {/* Canvas Background Grid */}
-        <div
-          className="absolute inset-0 opacity-20 pointer-events-none"
-          style={{
-            backgroundImage: `radial-gradient(#6366f1 1.5px, transparent 1.5px)`,
-            backgroundSize: `${32 * zoom}px ${32 * zoom}px`,
-            backgroundPosition: `${pan.x}px ${pan.y}px`,
-          }}
-        />
-
-        <CanvasToolbar zoom={zoom} setZoom={setZoom} resetView={resetView} />
-
-        {/* Tree Container Transformed with Pan & Zoom */}
-        <div
-          style={{
-            transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
-            transformOrigin: '0 0',
-            transition: isDragging ? 'none' : 'transform 0.1s ease-out',
-          }}
-          className="absolute top-0 left-0 w-full h-full pointer-events-none"
+        {/* Main Interactive Canvas */}
+        <main
+          ref={containerRef}
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          onWheel={handleWheel}
+          className="flex-1 relative cursor-grab active:cursor-grabbing bg-slate-950 overflow-hidden select-none"
         >
-          {/* Upper Tree Lead Connector Curves */}
-          <svg className="absolute inset-0 w-[5000px] h-[5000px] pointer-events-none overflow-visible">
-            <defs>
-              <linearGradient id="line-grad" x1="0%" y1="0%" x2="0%" y2="100%">
-                <stop offset="0%" stopColor="#6366f1" stopOpacity="0.8" />
-                <stop offset="100%" stopColor="#a855f7" stopOpacity="0.4" />
-              </linearGradient>
-            </defs>
-            {treeLayout.lines.map((line) => {
-              const midY = (line.y1 + line.y2) / 2;
-              const path = `M ${line.x1} ${line.y1} C ${line.x1} ${midY}, ${line.x2} ${midY}, ${line.x2} ${line.y2}`;
+          {/* Canvas Background Grid */}
+          <div
+            className="absolute inset-0 opacity-20 pointer-events-none"
+            style={{
+              backgroundImage: `radial-gradient(#6366f1 1.5px, transparent 1.5px)`,
+              backgroundSize: `${32 * zoom}px ${32 * zoom}px`,
+              backgroundPosition: `${pan.x}px ${pan.y}px`,
+            }}
+          />
+
+          <CanvasToolbar zoom={zoom} setZoom={setZoom} resetView={resetView} />
+
+          {/* Tree Container Transformed with Pan & Zoom */}
+          <div
+            style={{
+              transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+              transformOrigin: '0 0',
+              transition: isDragging ? 'none' : 'transform 0.1s ease-out',
+            }}
+            className="absolute top-0 left-0 w-full h-full pointer-events-none"
+          >
+            {/* Upper Tree Lead Connector Curves */}
+            <svg className="absolute inset-0 w-[5000px] h-[5000px] pointer-events-none overflow-visible">
+              <defs>
+                <linearGradient id="line-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+                  <stop offset="0%" stopColor="#6366f1" stopOpacity="0.8" />
+                  <stop offset="100%" stopColor="#a855f7" stopOpacity="0.4" />
+                </linearGradient>
+              </defs>
+              {treeLayout.lines.map((line) => {
+                const midY = (line.y1 + line.y2) / 2;
+                const path = `M ${line.x1} ${line.y1} C ${line.x1} ${midY}, ${line.x2} ${midY}, ${line.x2} ${line.y2}`;
+                return (
+                  <path
+                    key={line.id}
+                    d={path}
+                    fill="none"
+                    stroke="url(#line-grad)"
+                    strokeWidth="2.5"
+                    className="transition-all duration-300"
+                  />
+                );
+              })}
+            </svg>
+
+            {/* Rendered Lead Trees & Attached Worker Rows */}
+            {treeLayout.rootNodes.map((node) => {
+              const isSelected = selectedNodeId === node.id;
+
               return (
-                <path
-                  key={line.id}
-                  d={path}
-                  fill="none"
-                  stroke="url(#line-grad)"
-                  strokeWidth="2.5"
-                  className="transition-all duration-300"
-                />
-              );
-            })}
-          </svg>
-
-          {/* Rendered Lead Trees & Attached Worker Rows */}
-          {treeLayout.rootNodes.map((node) => {
-            const isSelected = selectedNodeId === node.id;
-
-            return (
-              <div
-                key={node.id}
-                style={{
-                  left: `${node.x}px`,
-                  top: `${node.y}px`,
-                  width: '360px',
-                }}
-                className="absolute pointer-events-auto flex flex-col items-center"
-              >
-                {/* Lead Card Container */}
                 <div
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setSelectedNodeId(node.id);
+                  key={node.id}
+                  style={{
+                    left: `${node.x}px`,
+                    top: `${node.y}px`,
+                    width: '360px',
                   }}
-                  className={`interactive-card w-full cursor-pointer rounded-xl p-4 transition-all duration-200 border shadow-xl ${isSelected
+                  className="absolute pointer-events-auto flex flex-col items-center"
+                >
+                  {/* Lead Card Container */}
+                  <div
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedNodeId(node.id);
+                    }}
+                    className={`interactive-card w-full cursor-pointer rounded-xl p-4 transition-all duration-200 border shadow-xl ${isSelected
                       ? 'bg-slate-900 border-indigo-500 shadow-indigo-500/25 ring-2 ring-indigo-500/50 scale-[1.02] z-10'
                       : 'bg-slate-900/95 border-slate-800 hover:border-slate-700 hover:bg-slate-900'
-                    }`}
-                >
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border bg-amber-500/10 text-amber-400 border-amber-500/30">
-                      {node.level === 0 ? 'Root Lead' : 'Team Lead'}
-                    </span>
-                    <span className="flex items-center gap-1.5 text-[11px] text-slate-400">
-                      <span
-                        className={`w-2 h-2 rounded-full ${node.status === 'Active'
-                            ? 'bg-emerald-400 shadow-emerald-400/50'
-                            : node.status === 'Busy'
-                              ? 'bg-amber-400'
-                              : 'bg-slate-400'
-                          }`}
-                      />
-                      {node.status || 'Idle'}
-                    </span>
+                      }`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border bg-amber-500/10 text-amber-400 border-amber-500/30">
+                        {node.level === 0 ? 'Root Lead' : 'Team Lead'}
+                      </span>
+                      <span className="flex items-center gap-1.5 text-[11px] text-slate-400">
+                        <span className={`w-2 h-2 rounded-full ${getStatusColor(node.status).dot}`} />
+                        {node.status || 'Idle'}
+                      </span>
+                    </div>
+
+                    <h3 className="font-bold text-slate-100 text-sm truncate">{node.name}</h3>
+
+                    {/* Direct Agent Dots assigned to this Lead */}
+                    {node.assignedAgents && node.assignedAgents.length > 0 && (
+                      <div className="mt-2.5 pt-2 border-t border-slate-800/80 flex items-center justify-between">
+                        <span className="text-[10px] text-purple-400 font-semibold uppercase">
+                          Lead Agents ({node.assignedAgents.length})
+                        </span>
+                        <div className="flex items-center gap-1.5 overflow-x-auto max-w-[200px]">
+                          {node.assignedAgents.map((agent) => (
+                            <AgentDot
+                              key={agent.id}
+                              agent={agent}
+                              onSelectAgent={(id) => setSelectedNodeId(id)}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
 
-                  <h3 className="font-bold text-slate-100 text-sm truncate">{node.name}</h3>
+                  {/* Vertical Stem Line Connecting to Subordinate Workers */}
+                  {node.teamWorkers && node.teamWorkers.length > 0 && (
+                    <>
+                      <div className="w-0.5 h-4 bg-gradient-to-b from-indigo-500 to-purple-500 opacity-70" />
 
-                  {/* Direct Agent Dots assigned to this Lead */}
-                  {node.assignedAgents && node.assignedAgents.length > 0 && (
-                    <div className="mt-2.5 pt-2 border-t border-slate-800/80 flex items-center justify-between">
-                      <span className="text-[10px] text-purple-400 font-semibold uppercase">
-                        Lead Agents ({node.assignedAgents.length})
-                      </span>
-                      <div className="flex items-center gap-1.5 overflow-x-auto max-w-[200px]">
-                        {node.assignedAgents.map((agent) => (
-                          <AgentDot
-                            key={agent.id}
-                            agent={agent}
-                            onSelectAgent={(id) => setSelectedNodeId(id)}
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
+                      {/* Subordinates Row Box */}
+                      <div className="w-full bg-slate-950/90 border border-slate-800/90 rounded-xl p-3 shadow-xl backdrop-blur-sm">
+                        <div className="flex items-center justify-between mb-2 pb-1.5 border-b border-slate-800/80 px-1">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-400">
+                            Team Workers ({node.teamWorkers.length})
+                          </span>
+                          <span className="text-[9px] font-mono text-slate-500">Agent Dots</span>
+                        </div>
 
-                {/* Vertical Stem Line Connecting to Subordinate Workers */}
-                {node.teamWorkers && node.teamWorkers.length > 0 && (
-                  <>
-                    <div className="w-0.5 h-4 bg-gradient-to-b from-indigo-500 to-purple-500 opacity-70" />
-
-                    {/* Subordinates Row Box */}
-                    <div className="w-full bg-slate-950/90 border border-slate-800/90 rounded-xl p-3 shadow-xl backdrop-blur-sm">
-                      <div className="flex items-center justify-between mb-2 pb-1.5 border-b border-slate-800/80 px-1">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-400">
-                          Team Workers ({node.teamWorkers.length})
-                        </span>
-                        <span className="text-[9px] font-mono text-slate-500">Agent Dots</span>
-                      </div>
-
-                      {/* Subordinate Worker Rows */}
-                      <div className="space-y-1.5 max-h-56 overflow-y-auto pr-0.5 custom-scrollbar">
-                        {node.teamWorkers.map((worker) => {
-                          const isWorkerSelected = selectedNodeId === worker.id;
-                          return (
-                            <div
-                              key={worker.id}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setSelectedNodeId(worker.id);
-                              }}
-                              className={`flex items-center justify-between p-2 rounded-lg text-xs transition-all border cursor-pointer ${isWorkerSelected
+                        {/* Subordinate Worker Rows */}
+                        <div className="space-y-1.5 max-h-56 overflow-y-auto pr-0.5 custom-scrollbar">
+                          {node.teamWorkers.map((worker) => {
+                            const isWorkerSelected = selectedNodeId === worker.id;
+                            return (
+                              <div
+                                key={worker.id}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedNodeId(worker.id);
+                                }}
+                                className={`flex items-center justify-between p-2 rounded-lg text-xs transition-all border cursor-pointer ${isWorkerSelected
                                   ? 'bg-indigo-950/80 border-indigo-500 text-indigo-100 font-medium ring-1 ring-indigo-500/40 shadow-md'
                                   : 'bg-slate-900/80 border-slate-800 text-slate-300 hover:bg-slate-800 hover:border-slate-700'
-                                }`}
-                            >
-                              {/* Worker Label & Status */}
-                              <div className="flex items-center gap-2 truncate pr-2">
-                                <span
-                                  className={`w-2 h-2 rounded-full shrink-0 ${worker.status === 'Active'
-                                      ? 'bg-emerald-400'
-                                      : worker.status === 'Busy'
-                                        ? 'bg-amber-400'
-                                        : 'bg-slate-500'
-                                    }`}
-                                />
-                                <span className="truncate text-[11px] font-medium leading-tight">
-                                  {worker.name}
-                                </span>
-                              </div>
-
-                              {/* Hoverable Agent Dots for this Worker */}
-                              <div className="flex items-center gap-1 shrink-0">
-                                {worker.assignedAgents.length > 0 ? (
-                                  worker.assignedAgents.map((agent) => (
-                                    <AgentDot
-                                      key={agent.id}
-                                      agent={agent}
-                                      onSelectAgent={(id) => setSelectedNodeId(id)}
-                                    />
-                                  ))
-                                ) : (
-                                  <span className="text-[9px] text-slate-600 font-mono italic">
-                                    no agents
+                                  }`}
+                              >
+                                {/* Worker Label & Status */}
+                                <div className="flex items-center gap-2 truncate pr-2">
+                                  <span className={`w-2 h-2 rounded-full shrink-0 ${getStatusColor(worker.status).dot}`} />
+                                  <span className="truncate text-[11px] font-medium leading-tight">
+                                    {worker.name}
                                   </span>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </main>
+                                </div>
 
-      {/* Selected Node Details Panel */}
-      {selectedNode && (
-        <NodeInspector
-          selectedNode={selectedNode}
-          nodes={nodes}
-          tasks={tasks}
-          onClose={() => setSelectedNodeId(null)}
-          onUpdateNode={updateNode}
-          onDeleteNode={deleteNode}
-          onAddTask={addTask}
-          onToggleTask={toggleTask}
-          onDeleteTask={deleteTask}
-        />
-      )}
-    </div>
-  );
-}
+                                {/* Hoverable Agent Dots for this Worker */}
+                                <div className="flex items-center gap-1 shrink-0">
+                                  {worker.assignedAgents.length > 0 ? (
+                                    worker.assignedAgents.map((agent) => (
+                                      <AgentDot
+                                        key={agent.id}
+                                        agent={agent}
+                                        onSelectAgent={(id) => setSelectedNodeId(id)}
+                                      />
+                                    ))
+                                  ) : (
+                                    <span className="text-[9px] text-slate-600 font-mono italic">
+                                      no agents
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </main>
+
+        {selectedNode && (
+          <NodeInspector
+            selectedNode={selectedNode}
+            nodes={nodes}
+            tasks={tasks}
+            runningTaskId={runningTaskId}
+            agentResult={agentResult}
+            onClose={() => setSelectedNodeId(null)}
+            onUpdateNode={updateNode}
+            onDeleteNode={deleteNode}
+            onAddTask={addTask}
+            onToggleTask={toggleTask}
+            onDeleteTask={deleteTask}
+            onExecuteTask={handleExecuteTaskWithAgent}
+          />
+        )}
+      </div>
+    );
+  }
