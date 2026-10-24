@@ -7,7 +7,7 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 export interface FindingResult {
     facts: string[];
     hypothesis: string;
-    recommendedAction: string;
+    recommendedActions: string[];
     unknowns: string[];
 }
 
@@ -25,9 +25,18 @@ export async function runInvestigation(
     const messages: Anthropic.MessageParam[] = [
         {
             role: 'user',
-            content: `Investigate operational bottlenecks or status issues for node "${targetNode.name}" (ID: ${targetNode.id}, Type: ${targetNode.type}, Status: ${targetNode.status || 'Idle'}). Use available tools to gather evidence, then summarize findings in JSON format with keys: facts, hypothesis, recommendedAction, unknowns.`,
+            content: `Investigate operational bottlenecks or status issues for node "${targetNode.name}" (ID: ${targetNode.id}, Type: ${targetNode.type}, Status: ${targetNode.status || 'Idle'}).
+
+Gather evidence with available tools, then provide a structured diagnosis.
+Return strictly JSON matching this structure:
+{
+  "facts": ["Itemized factual observations from tool outputs"],
+  "hypothesis": "Concise 1-2 sentence diagnosis of what is likely happening.",
+  "recommendedActions": ["Clear, step-by-step actionable recommendations"],
+  "unknowns": ["Missing information or unconfirmed factors"]
+}`,
         },
-    ];
+    ];;
 
     let toolTurns = 0;
     const MAX_TURNS = 5;
@@ -70,7 +79,7 @@ export async function runInvestigation(
             return {
                 facts: ['Investigation completed with unstructured output.'],
                 hypothesis: rawText,
-                recommendedAction: 'Review node status manually.',
+                recommendedActions: ['Review node status manually.'],
                 unknowns: [],
             };
         }
