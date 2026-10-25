@@ -298,6 +298,12 @@ function SidebarHeader({ isConnected, identity }: { isConnected: boolean; identi
           >
             📊 Meta Analysis
           </Link>
+          <Link
+            href="/live"
+            className="flex-1 items-center justify-center text-center text-xs font-medium px-2.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition-all"
+          >
+            ⚡ Live
+          </Link>
         </div>
       </header>
 

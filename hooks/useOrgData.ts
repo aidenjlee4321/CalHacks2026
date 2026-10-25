@@ -31,6 +31,15 @@ const createBaseDataset = () => {
         'Review architecture design proposal',
     ];
 
+    // Agents get tasks that need the live web, so running any agent shows the Apify browse_web tool at work
+    const agentTaskTemplates = [
+        'Research the top 3 competitors of Stripe and compare their pricing',
+        'Compare the pricing plans of Notion, Coda and Airtable',
+        'Find 3 upcoming AI hackathons in the Bay Area',
+        'Summarize what Apify does in 3 bullet points',
+        'Find the latest SpacetimeDB release and summarize what changed',
+    ];
+
     const nodes: OrgNode[] = [
         { id: 'node-1', name: 'Executive Lead #001', type: 'Lead', status: 'Active' },
         { id: 'node-2', name: 'Engineering Lead #002', type: 'Lead', status: 'Active', superior: 'node-1' },
@@ -71,7 +80,7 @@ const createBaseDataset = () => {
             tasks.push({
                 id: `t-${taskCounter}`,
                 assignedNodeId: node.id,
-                title: `${taskTemplates[taskCounter % taskTemplates.length]} [Job #${taskCounter}]`,
+                title: `${(node.type === 'Agent' ? agentTaskTemplates : taskTemplates)[taskCounter % 5]} [Job #${taskCounter}]`,
                 completed: taskCounter % 3 === 0,
             });
             taskCounter++;

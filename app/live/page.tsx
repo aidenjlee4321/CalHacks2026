@@ -4,10 +4,14 @@ import HumanInbox from '../../components/HumanInbox';
 import DemoControls from '../../components/DemoControls';
 import LiveActivityFeed from '../../components/LiveActivityFeed';
 import ResearchPanel from '../../components/ResearchPanel';
+import Link from 'next/link';
 
 export default function LivePage() {
   return (
     <main className="min-h-screen bg-gray-50 p-8 text-gray-900">
+      <Link href="/" className="mb-3 inline-block text-sm font-medium text-indigo-600 hover:underline">
+        ← Back to org dashboard
+      </Link>
       <h1 className="mb-6 text-2xl font-bold">Hybrid Org-Chart (live on SpacetimeDB)</h1>
       <SpacetimeProvider>
         <DemoControls />
