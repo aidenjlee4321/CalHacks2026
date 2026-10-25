@@ -38,6 +38,40 @@ Every agent in the org can browse the live web. When a task needs real-world fac
 
 **Try it:** select an agent (click one of the small dots on a card), add the task *"Find 3 competitors of Notion and compare their pricing"*, then click **⚡ Run Agent**.
 
+## Architecture
+
+```mermaid
+flowchart TB
+    UI["<b>Browser</b> (Next.js pages)<br/>/ dashboard · /worker · /meta-analysis · /live"]
+
+    subgraph STDB["SpacetimeDB (Maincloud)"]
+        Reducers["Reducers<br/>request_help · resolve_handoff · assign_task ..."]
+        Timer["Scheduled reducer<br/>escalate after 15 s"]
+        Tables[("Tables<br/>org_node · task · handoff · activity")]
+        Reducers --> Tables
+        Timer --> Tables
+    end
+
+    API["<b>Next.js API routes</b> (Vercel)<br/>/api/agent/run · /api/research · /api/investigations"]
+
+    subgraph EXT["External APIs"]
+        Claude["Claude<br/>(Anthropic API)"]
+        RAG["Apify<br/>RAG Web Browser"]
+        Crawler["Apify<br/>Website Content Crawler"]
+    end
+
+    UI -->|"call reducers"| Reducers
+    Tables -->|"live subscriptions"| UI
+    UI -->|"run tasks, research, scans"| API
+    API -->|"agent work"| Claude
+    API -->|"browse_web tool"| RAG
+    API -->|"/live research"| Crawler
+```
+
+- **SpacetimeDB** holds the shared, live state: every browser subscribes to the same tables, and escalation runs inside the database as a scheduled reducer.
+- **Next.js API routes** keep API keys on the server: they call Claude for agent work and Apify when an agent needs the web.
+- **Telemetry** (tokens, cost, latency) is kept in server memory and shown on Meta Analysis.
+
 ## Tech stack
 
 - [Next.js 16](https://nextjs.org) (App Router) + React 19 + TypeScript
