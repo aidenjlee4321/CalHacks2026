@@ -2,6 +2,8 @@
 
 **A live org chart for hybrid human + AI teams.** Built at CalHacks 2026.
 
+**Live demo:** https://spacetime-org.vercel.app
+
 Companies are starting to staff teams with a mix of people and AI agents. Spacetime Org models that org as one hierarchy. **Leads** manage **Workers**, and Workers manage **Agents**. You can see who reports to whom, hand tasks to agents, run those agents against Claude, and track how they're performing.
 
 ## Features
@@ -25,12 +27,24 @@ The `org-backend/spacetimedb` module stores the org in real-time tables: `org_no
 
 `reset_demo` wipes the tables and loads a small sample org: a VP, a manager, and two agents.
 
+### Apify: agents can see the web
+
+Every agent in the org can browse the live web. When a task needs real-world facts (a company, its competitors, pricing, news, docs), the agent **decides on its own** to call a `browse_web` tool. That tool hires the [Apify RAG Web Browser Actor](https://apify.com/apify/rag-web-browser), which searches Google or opens the URL and returns clean markdown of the top pages. The agent writes its report from that evidence and cites the pages it read.
+
+- Code: `lib/apifyWebTool.ts` (the tool + Claude tool-use loop), used by `POST /api/agent/run`.
+- Each answer that used the web ends with **🌐 Web research via Apify** and the URLs read, so humans can check the evidence.
+- Tasks that don't need the web (e.g. "write a thank-you email") never call Apify.
+- `/live` also has a **🔍 Research** box: Apify's Website Content Crawler reads a company site, Claude summarizes it, and if something is unclear the agent pauses and opens a SpacetimeDB handoff to its human manager (`app/api/research`, `components/ResearchPanel.tsx`).
+
+**Try it:** select an agent (click one of the small dots on a card), add the task *"Find 3 competitors of Notion and compare their pricing"*, then click **⚡ Run Agent**.
+
 ## Tech stack
 
 - [Next.js 16](https://nextjs.org) (App Router) + React 19 + TypeScript
 - Tailwind CSS v4
 - [SpacetimeDB](https://spacetimedb.com) 2.x (real-time database + server module, hosted on Maincloud)
 - [Anthropic SDK](https://github.com/anthropics/anthropic-sdk-typescript) for agent runs
+- [Apify](https://apify.com) Actors (RAG Web Browser, Website Content Crawler) as the agents' web tool
 
 ## Project structure
 
@@ -73,7 +87,12 @@ Create a `.env.local` file in the project root:
 
 ```bash
 ANTHROPIC_API_KEY=sk-ant-...
+APIFY_TOKEN=apify_api_...
+NEXT_PUBLIC_SPACETIMEDB_HOST=wss://maincloud.spacetimedb.com
+NEXT_PUBLIC_SPACETIMEDB_MODULE=org-backend-afa0s
 ```
+
+Never commit `.env.local`. Without `APIFY_TOKEN`, agents still run but can't browse the web.
 
 ### 3. Run the dev server
 
@@ -115,10 +134,10 @@ spacetime publish
 
 After you change any tables or reducers, regenerate the TypeScript client bindings with `spacetime generate` and output them into `lib/module_bindings/`.
 
-The client connects to the database `org-backend-afa0s` on Maincloud, set in `components/LiveSpacetimeProvider.tsx`. That name matches `org-backend/spacetime.local.json`. If you publish under a different name, update both.
+The client connects to the database set by `NEXT_PUBLIC_SPACETIMEDB_HOST` / `NEXT_PUBLIC_SPACETIMEDB_MODULE` (we use `org-backend-afa0s` on Maincloud), read in `components/LiveSpacetimeProvider.tsx`. That name matches `org-backend/spacetime.local.json`. If you publish under a different name, update both.
 
 ## Notes
 
 - Agent telemetry is stored in memory on the Next.js server, so it resets when the server restarts.
-- `/api/agent/run` uses the first model returned by the Anthropic models API for your key.
+- `/api/agent/run` runs each agent on its assigned Claude model and adds the Apify `browse_web` tool when `APIFY_TOKEN` is set.
 - `/api/chat` and `/api/reset` are placeholders.
