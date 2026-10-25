@@ -6,21 +6,55 @@
 import { type Infer as __Infer } from "spacetimedb";
 
 // Import all reducer arg schemas
+import AddLessonReducer from "../add_lesson_reducer";
 import AddNodeReducer from "../add_node_reducer";
+import AddParentReducer from "../add_parent_reducer";
+import AddTaskReducer from "../add_task_reducer";
 import AssignTaskReducer from "../assign_task_reducer";
+import AssignTaskToReducer from "../assign_task_to_reducer";
 import CompleteTaskReducer from "../complete_task_reducer";
+import DeleteLessonReducer from "../delete_lesson_reducer";
+import DeleteNodeReducer from "../delete_node_reducer";
+import DeleteTaskReducer from "../delete_task_reducer";
 import LogActivityReducer from "../log_activity_reducer";
-import RequestHelpReducer from "../request_help_reducer";
+import MoveNodeReducer from "../move_node_reducer";
+import RecordTelemetryReducer from "../record_telemetry_reducer";
+import RemoveParentReducer from "../remove_parent_reducer";
+import ReportAnomalyReducer from "../report_anomaly_reducer";
+import RequestApprovalReducer from "../request_approval_reducer";
 import ResetDemoReducer from "../reset_demo_reducer";
 import ResolveHandoffReducer from "../resolve_handoff_reducer";
+import SetAgentModelReducer from "../set_agent_model_reducer";
+import SetLessonApprovedReducer from "../set_lesson_approved_reducer";
+import SetSettingReducer from "../set_setting_reducer";
+import SetTaskStatusReducer from "../set_task_status_reducer";
+import ToggleTaskReducer from "../toggle_task_reducer";
+import UpdateNodeReducer from "../update_node_reducer";
 import UpdateStatusReducer from "../update_status_reducer";
 
+export type AddLessonParams = __Infer<typeof AddLessonReducer>;
 export type AddNodeParams = __Infer<typeof AddNodeReducer>;
+export type AddParentParams = __Infer<typeof AddParentReducer>;
+export type AddTaskParams = __Infer<typeof AddTaskReducer>;
 export type AssignTaskParams = __Infer<typeof AssignTaskReducer>;
+export type AssignTaskToParams = __Infer<typeof AssignTaskToReducer>;
 export type CompleteTaskParams = __Infer<typeof CompleteTaskReducer>;
+export type DeleteLessonParams = __Infer<typeof DeleteLessonReducer>;
+export type DeleteNodeParams = __Infer<typeof DeleteNodeReducer>;
+export type DeleteTaskParams = __Infer<typeof DeleteTaskReducer>;
 export type LogActivityParams = __Infer<typeof LogActivityReducer>;
-export type RequestHelpParams = __Infer<typeof RequestHelpReducer>;
+export type MoveNodeParams = __Infer<typeof MoveNodeReducer>;
+export type RecordTelemetryParams = __Infer<typeof RecordTelemetryReducer>;
+export type RemoveParentParams = __Infer<typeof RemoveParentReducer>;
+export type ReportAnomalyParams = __Infer<typeof ReportAnomalyReducer>;
+export type RequestApprovalParams = __Infer<typeof RequestApprovalReducer>;
 export type ResetDemoParams = __Infer<typeof ResetDemoReducer>;
 export type ResolveHandoffParams = __Infer<typeof ResolveHandoffReducer>;
+export type SetAgentModelParams = __Infer<typeof SetAgentModelReducer>;
+export type SetLessonApprovedParams = __Infer<typeof SetLessonApprovedReducer>;
+export type SetSettingParams = __Infer<typeof SetSettingReducer>;
+export type SetTaskStatusParams = __Infer<typeof SetTaskStatusReducer>;
+export type ToggleTaskParams = __Infer<typeof ToggleTaskReducer>;
+export type UpdateNodeParams = __Infer<typeof UpdateNodeReducer>;
 export type UpdateStatusParams = __Infer<typeof UpdateStatusReducer>;
 

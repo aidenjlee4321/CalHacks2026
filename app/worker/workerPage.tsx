@@ -2,12 +2,12 @@
 
 import React, { useState, useMemo } from 'react';
 import Link from 'next/link';
-import { useOrgData } from '@/hooks/useOrgData'; // Uses existing hook
+import { useOrgData } from '@/hooks/useOrgData';
 import { getStatusColor } from '@/app/page';
 import UserMenu from '@/components/UserMenu';
 
 export default function WorkerPortalPage() {
-    const { nodes, tasks, updateNodeStatus, toggleTask, addTask } = useOrgData();
+    const { nodes, tasks, updateStatus: updateNodeStatus, toggleTask, assignTask: addTask } = useOrgData();
 
     // 1. All Worker nodes available to impersonate
     const workerNodes = useMemo(
@@ -50,7 +50,6 @@ export default function WorkerPortalPage() {
 
         setIsExecuting(true);
         setAgentOutput(null);
-        updateNodeStatus(targetAgent.id, 'Busy');
 
         try {
             const res = await fetch('/api/agent/run', {
@@ -72,7 +71,6 @@ export default function WorkerPortalPage() {
             console.error('Agent dispatch failed:', err);
         } finally {
             setIsExecuting(false);
-            updateNodeStatus(targetAgent.id, 'Idle');
         }
     };
 
@@ -116,7 +114,7 @@ export default function WorkerPortalPage() {
                             <span className="text-lg font-bold text-white">{activeWorker.name}</span>
                         </div>
 
-                        {/* Set Operational Status */}
+                        {/* Set Operational Status for Human Worker */}
                         <div className="flex items-center gap-2">
                             <span className="text-xs text-slate-400 mr-2">Set My Status:</span>
                             {['Active', 'Busy', 'Idle', 'Offline'].map((status) => {
@@ -126,8 +124,8 @@ export default function WorkerPortalPage() {
                                         key={status}
                                         onClick={() => updateNodeStatus(activeWorker.id, status)}
                                         className={`px-3 py-1 text-xs font-semibold rounded-lg border transition-all ${isCurrent
-                                                ? getStatusColor(status).badge + ' ring-1 ring-indigo-500'
-                                                : 'bg-slate-950 text-slate-400 border-slate-800 hover:border-slate-700'
+                                            ? getStatusColor(status).badge + ' ring-1 ring-indigo-500'
+                                            : 'bg-slate-950 text-slate-400 border-slate-800 hover:border-slate-700'
                                             }`}
                                     >
                                         {status}

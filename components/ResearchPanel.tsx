@@ -5,13 +5,14 @@ import { useTable, useReducer } from 'spacetimedb/react';
 import { tables, reducers } from '../lib/module_bindings';
 
 export default function ResearchPanel() {
-  const [tasks] = useTable(tables.task);
+  const [taskRows] = useTable(tables.task);
+  const tasks = Array.isArray(taskRows) ? taskRows : [];
   const tasksRef = useRef(tasks);
   tasksRef.current = tasks; // always the latest tasks
 
   const assignTask = useReducer(reducers.assignTask);
   const logActivity = useReducer(reducers.logActivity);
-  const requestHelp = useReducer(reducers.requestHelp);
+  const requestApproval = useReducer(reducers.requestApproval);
   const completeTask = useReducer(reducers.completeTask);
 
   const [url, setUrl] = useState('https://');
@@ -39,10 +40,11 @@ export default function ResearchPanel() {
       if (!task) return;
 
       if (data.conflict) {
-        requestHelp({
+        requestApproval({
           taskId: task.id,
-          question: data.question,
-          context: `Evidence scraped by Apify:\n${(data.sources ?? []).join('\n')}`,
+          action: 'Resolve Scraped Data Conflict',
+          reason: data.question || 'Data conflict detected during web crawl',
+          details: `Evidence scraped by Apify:\n${(data.sources ?? []).join('\n')}`,
         });
       } else {
         completeTask({ taskId: task.id });

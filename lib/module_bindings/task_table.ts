@@ -12,7 +12,8 @@ import {
 
 export default __t.row({
   id: __t.string().primaryKey(),
+  nodeId: __t.string().name("node_id"),
   description: __t.string(),
   status: __t.string(),
-  nodeId: __t.string().name("node_id"),
+  assignedById: __t.string().name("assigned_by_id"),
 });

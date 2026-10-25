@@ -11,7 +11,8 @@ import {
 } from "spacetimedb";
 
 export default {
-  taskId: __t.string(),
-  question: __t.string(),
-  context: __t.string(),
+  id: __t.string(),
+  byId: __t.string(),
+  nodeId: __t.string(),
+  description: __t.string(),
 };

@@ -36,47 +36,24 @@ import {
 // Import all reducer arg schemas
 import AddNodeReducer from "./add_node_reducer";
 import AssignTaskReducer from "./assign_task_reducer";
-import CompleteTaskReducer from "./complete_task_reducer";
-import LogActivityReducer from "./log_activity_reducer";
-import RequestHelpReducer from "./request_help_reducer";
+import DeleteNodeReducer from "./delete_node_reducer";
+import DeleteTaskReducer from "./delete_task_reducer";
 import ResetDemoReducer from "./reset_demo_reducer";
-import ResolveHandoffReducer from "./resolve_handoff_reducer";
+import ToggleTaskReducer from "./toggle_task_reducer";
+import UpdateNodeReducer from "./update_node_reducer";
 import UpdateStatusReducer from "./update_status_reducer";
 
 // Import all procedure arg schemas
 
 // Import all table schema definitions
-import ActivityRow from "./activity_table";
-import HandoffRow from "./handoff_table";
 import OrgNodeRow from "./org_node_table";
+import ReportsToRow from "./reports_to_table";
 import TaskRow from "./task_table";
 
 /** Type-only namespace exports for generated type groups. */
 
 /** The schema information for all tables in this module. This is defined the same was as the tables would have been defined in the server. */
 const tablesSchema = __schema({
-  activity: __table({
-    name: 'activity',
-    indexes: [
-      { accessor: 'id', name: 'activity_id_idx_btree', algorithm: 'btree', columns: [
-        'id',
-      ] },
-    ],
-    constraints: [
-      { name: 'activity_id_key', constraint: 'unique', columns: ['id'] },
-    ],
-  }, ActivityRow),
-  handoff: __table({
-    name: 'handoff',
-    indexes: [
-      { accessor: 'id', name: 'handoff_id_idx_btree', algorithm: 'btree', columns: [
-        'id',
-      ] },
-    ],
-    constraints: [
-      { name: 'handoff_id_key', constraint: 'unique', columns: ['id'] },
-    ],
-  }, HandoffRow),
   orgNode: __table({
     name: 'org_node',
     indexes: [
@@ -88,6 +65,17 @@ const tablesSchema = __schema({
       { name: 'org_node_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, OrgNodeRow),
+  reportsTo: __table({
+    name: 'reports_to',
+    indexes: [
+      { accessor: 'id', name: 'reports_to_id_idx_btree', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'reports_to_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, ReportsToRow),
   task: __table({
     name: 'task',
     indexes: [
@@ -105,11 +93,11 @@ const tablesSchema = __schema({
 const reducersSchema = __reducers(
   __reducerSchema("add_node", AddNodeReducer),
   __reducerSchema("assign_task", AssignTaskReducer),
-  __reducerSchema("complete_task", CompleteTaskReducer),
-  __reducerSchema("log_activity", LogActivityReducer),
-  __reducerSchema("request_help", RequestHelpReducer),
+  __reducerSchema("delete_node", DeleteNodeReducer),
+  __reducerSchema("delete_task", DeleteTaskReducer),
   __reducerSchema("reset_demo", ResetDemoReducer),
-  __reducerSchema("resolve_handoff", ResolveHandoffReducer),
+  __reducerSchema("toggle_task", ToggleTaskReducer),
+  __reducerSchema("update_node", UpdateNodeReducer),
   __reducerSchema("update_status", UpdateStatusReducer),
 );
 

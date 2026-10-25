@@ -8,6 +8,7 @@ import { UsageRow, UsageTotals, ownedAgents, sumTotals, teamAgentIds, usageByAge
 import AgentSpendPanel from '@/components/AgentSpendPanel';
 import UserMenu from '@/components/UserMenu';
 import { formatCompact, formatUsd } from '@/components/UsageCharts';
+import { useSession } from '@/components/SessionProvider';
 
 // ============================================================================
 // 1. TYPES & LAYOUT MODELS
@@ -42,9 +43,13 @@ export function parseSuperior(node: OrgNode): string | null {
   if (node.superior) return node.superior;
   if (node.reportsToJson) {
     try {
-      return JSON.parse(node.reportsToJson);
+      const parsed = JSON.parse(node.reportsToJson);
+      if (Array.isArray(parsed)) {
+        return parsed.length > 0 ? String(parsed[0]) : null;
+      }
+      return parsed ? String(parsed) : null;
     } catch {
-      return node.reportsToJson;
+      return typeof node.reportsToJson === 'string' && node.reportsToJson.trim() ? node.reportsToJson : null;
     }
   }
   return null;
@@ -75,13 +80,11 @@ export interface WorkerCard {
 export const NODE_WIDTH = 360;
 export const WORKER_WIDTH = 150;
 const WORKER_GAP = 16;
-const WORKER_ROW_OFFSET = 230; // lead card top → worker row top
-const LEAD_CARD_BOTTOM = 140; // where connector lines leave a lead card
+const WORKER_ROW_OFFSET = 230;
+const LEAD_CARD_BOTTOM = 84;
 
 const workerRowWidth = (count: number) => (count ? count * WORKER_WIDTH + (count - 1) * WORKER_GAP : 0);
 
-// spreadWorkers: each worker gets its own card in a row under its lead (the lead's view),
-// instead of a stacked list inside the lead's panel (the CEO's view)
 export function calculateLeadTreeLayout(filteredNodes: OrgNode[], spreadWorkers = false) {
   if (filteredNodes.length === 0) return { rootNodes: [], lines: [], workerCards: [] };
 
@@ -89,49 +92,48 @@ export function calculateLeadTreeLayout(filteredNodes: OrgNode[], spreadWorkers 
   filteredNodes.forEach((n) => nodeMap.set(n.id, n));
 
   const agentMap = new Map<string, OrgNode[]>();
-  const workerMap = new Map<string, OrgNode[]>();
-  const leadChildrenMap = new Map<string, OrgNode[]>();
+  const childrenMap = new Map<string, OrgNode[]>();
 
   filteredNodes.forEach((n) => {
     const supId = parseSuperior(n);
-    if (!supId) return;
+    if (!supId || !nodeMap.has(supId)) return;
 
-    if (n.type === 'Agent') {
+    const typeUpper = (n.type || '').toUpperCase();
+
+    if (typeUpper === 'AGENT') {
       if (!agentMap.has(supId)) agentMap.set(supId, []);
       agentMap.get(supId)!.push(n);
-    } else if (n.type === 'Worker') {
-      if (!workerMap.has(supId)) workerMap.set(supId, []);
-      workerMap.get(supId)!.push(n);
-    } else if (n.type === 'Lead') {
-      if (!leadChildrenMap.has(supId)) leadChildrenMap.set(supId, []);
-      leadChildrenMap.get(supId)!.push(n);
+    } else {
+      if (!childrenMap.has(supId)) childrenMap.set(supId, []);
+      childrenMap.get(supId)!.push(n);
     }
   });
 
-  const rootLeads: OrgNode[] = [];
-  filteredNodes.forEach((n) => {
-    if (n.type === 'Lead') {
-      const supId = parseSuperior(n);
-      if (!supId || !nodeMap.has(supId) || nodeMap.get(supId)?.type !== 'Lead') {
-        rootLeads.push(n);
-      }
-    }
+  const rootNodesRaw = filteredNodes.filter((n) => {
+    if ((n.type || '').toUpperCase() === 'AGENT') return false;
+    const supId = parseSuperior(n);
+    return !supId || !nodeMap.has(supId);
   });
 
-  const buildExtendedLead = (leadNode: OrgNode, level: number): ExtendedLeadNode => {
-    const childLeadsRaw = leadChildrenMap.get(leadNode.id) || [];
-    const childrenNodes = childLeadsRaw.map((child) => buildExtendedLead(child, level + 1));
+  const buildTreeNode = (node: OrgNode, level: number): ExtendedLeadNode => {
+    const rawChildren = childrenMap.get(node.id) || [];
+    const assignedAgents = agentMap.get(node.id) || [];
 
-    const rawWorkers = workerMap.get(leadNode.id) || [];
-    const teamWorkers: WorkerWithAgents[] = rawWorkers.map((w) => ({
-      ...w,
-      assignedAgents: agentMap.get(w.id) || [],
-    }));
+    let childrenNodes: ExtendedLeadNode[] = [];
+    let teamWorkers: any[] = [];
 
-    const assignedAgents = agentMap.get(leadNode.id) || [];
+    // If level >= 1, its children (2 ranks below root) get folded into rows unless spreadWorkers is true
+    if (level >= 1 && !spreadWorkers) {
+      teamWorkers = rawChildren.map((child) => ({
+        ...child,
+        assignedAgents: agentMap.get(child.id) || []
+      }));
+    } else {
+      childrenNodes = rawChildren.map((child) => buildTreeNode(child, level + 1));
+    }
 
     return {
-      ...leadNode,
+      ...node,
       childrenNodes,
       teamWorkers,
       assignedAgents,
@@ -141,10 +143,10 @@ export function calculateLeadTreeLayout(filteredNodes: OrgNode[], spreadWorkers 
     };
   };
 
-  const extendedRoots = rootLeads.map((r) => buildExtendedLead(r, 0));
+  const extendedRoots = rootNodesRaw.map((r) => buildTreeNode(r, 0));
 
-  const LEVEL_HEIGHT = 520;
-  const HORIZONTAL_GAP = 80;
+  const LEVEL_HEIGHT = 240;
+  const HORIZONTAL_GAP = 60;
 
   let currentX = 80;
 
@@ -153,10 +155,8 @@ export function calculateLeadTreeLayout(filteredNodes: OrgNode[], spreadWorkers 
     node.y = level * LEVEL_HEIGHT + 80;
 
     if (node.childrenNodes.length === 0) {
-      // A spread-out worker row can be wider than the lead card; center the card over it
-      const width = spreadWorkers ? Math.max(NODE_WIDTH, workerRowWidth(node.teamWorkers.length)) : NODE_WIDTH;
-      node.x = currentX + (width - NODE_WIDTH) / 2;
-      currentX += width + HORIZONTAL_GAP;
+      node.x = currentX;
+      currentX += NODE_WIDTH + HORIZONTAL_GAP;
       return node.x;
     }
 
@@ -177,6 +177,8 @@ export function calculateLeadTreeLayout(filteredNodes: OrgNode[], spreadWorkers 
 
   const traverse = (node: ExtendedLeadNode) => {
     flattenedLeads.push(node);
+
+    // Map folded teamWorkers into absolutely positioned workerCards
     node.childrenNodes.forEach((child) => {
       lines.push({
         id: `${node.id}-${child.id}`,
@@ -187,23 +189,6 @@ export function calculateLeadTreeLayout(filteredNodes: OrgNode[], spreadWorkers 
       });
       traverse(child);
     });
-
-    if (spreadWorkers) {
-      const centerX = node.x + NODE_WIDTH / 2;
-      const rowStart = centerX - workerRowWidth(node.teamWorkers.length) / 2;
-      node.teamWorkers.forEach((worker, i) => {
-        const x = rowStart + i * (WORKER_WIDTH + WORKER_GAP);
-        const y = node.y + WORKER_ROW_OFFSET;
-        workerCards.push({ worker, x, y });
-        lines.push({
-          id: `${node.id}-${worker.id}`,
-          x1: centerX,
-          y1: node.y + LEAD_CARD_BOTTOM,
-          x2: x + WORKER_WIDTH / 2,
-          y2: y,
-        });
-      });
-    }
   };
 
   extendedRoots.forEach(traverse);
@@ -359,9 +344,9 @@ function SidebarHeader({ isConnected, identity }: { isConnected: boolean; identi
 
 function MetricsBar({ nodes, tasks }: { nodes: OrgNode[]; tasks: TaskItem[] }) {
   const metrics = useMemo(() => {
-    const leads = nodes.filter((n) => n.type === 'Lead').length;
-    const workers = nodes.filter((n) => n.type === 'Worker').length;
-    const agents = nodes.filter((n) => n.type === 'Agent').length;
+    const leads = nodes.filter((n) => (n.type || '').toUpperCase() === 'LEAD').length;
+    const workers = nodes.filter((n) => (n.type || '').toUpperCase() === 'WORKER').length;
+    const agents = nodes.filter((n) => (n.type || '').toUpperCase() === 'AGENT').length;
     const pendingTasks = tasks.filter((t) => !t.completed).length;
     return { leads, workers, agents, pendingTasks };
   }, [nodes, tasks]);
@@ -403,9 +388,10 @@ function AddNodeForm({
 
   const validSuperiorNodes = useMemo(() => {
     return nodes.filter((n) => {
-      if (nodeType === 'Lead') return n.type === 'Lead';
-      if (nodeType === 'Worker') return n.type === 'Lead';
-      if (nodeType === 'Agent') return n.type === 'Lead' || n.type === 'Worker';
+      const typeUpper = (n.type || '').toUpperCase();
+      if (nodeType === 'Lead') return typeUpper === 'LEAD';
+      if (nodeType === 'Worker') return typeUpper === 'LEAD';
+      if (nodeType === 'Agent') return typeUpper === 'LEAD' || typeUpper === 'WORKER';
       return false;
     });
   }, [nodes, nodeType]);
@@ -460,7 +446,7 @@ function AddNodeForm({
             {nodeType === 'Lead' ? 'None (Root Lead)' : 'Select Superior...'}
           </option>
           {validSuperiorNodes.map((n) => (
-            <option key={n.id} value={n.id} className="bg-slate-900 text-slate-200">
+            <option key={`superior-opt-${n.id}`} value={n.id} className="bg-slate-900 text-slate-200">
               {n.name} ({n.type})
             </option>
           ))}
@@ -579,7 +565,7 @@ function WorkerNodeCard({
         {worker.assignedAgents.length > 0 ? (
           <div className="flex items-center gap-1.5 p-1 -m-1 overflow-x-auto">
             {worker.assignedAgents.map((agent) => (
-              <AgentDot key={agent.id} agent={agent} onSelectAgent={onSelect} />
+              <AgentDot key={`card-agent-${agent.id}`} agent={agent} onSelectAgent={onSelect} />
             ))}
           </div>
         ) : (
@@ -636,7 +622,7 @@ function TaskManagerSection({
           Assigned Tasks ({selectedNodeTasks.length})
         </h3>
 
-        {selectedNode?.type?.toLowerCase() === 'agent' && (
+        {selectedNode?.type?.toUpperCase() === 'AGENT' && (
           <div className="flex items-center gap-1.5 bg-slate-950 px-2 py-1 rounded border border-slate-800">
             <label htmlFor="delay-sec" className="text-[10px] font-mono text-slate-400 uppercase">
               Delay (s):
@@ -676,7 +662,7 @@ function TaskManagerSection({
         ) : (
           selectedNodeTasks.map((task) => (
             <div
-              key={task.id}
+              key={`task-item-${task.id}`}
               className="flex items-center justify-between gap-2 p-2 bg-slate-950/60 rounded border border-slate-800/80 hover:border-slate-700 transition-colors"
             >
               <div
@@ -698,7 +684,7 @@ function TaskManagerSection({
               </div>
 
               <div className="flex items-center gap-1.5 shrink-0">
-                {selectedNode?.type?.toLowerCase() === 'agent' && (
+                {selectedNode?.type?.toUpperCase() === 'AGENT' && (
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -771,7 +757,7 @@ function NodeInspector({
   runningTaskId?: string | null;
   agentResult?: string | null;
   onClose: () => void;
-  onUpdateNode: (id: string, name: string, type: string, superiorId: string) => void;
+  onUpdateNode: (id: string, name: string, type: string, parentId: string, changeParent: boolean) => void;
   onDeleteNode: (id: string) => void;
   onAddTask: (nodeId: string, title: string) => void;
   onToggleTask: (id: string) => void;
@@ -783,7 +769,6 @@ function NodeInspector({
   const [investigating, setInvestigating] = useState(false);
   const [finding, setFinding] = useState<any>(null);
 
-  // Feedback form state
   const [correctionText, setCorrectionText] = useState('');
   const [isSubmittingFeedback, setIsSubmittingFeedback] = useState(false);
   const [feedbackSuccess, setFeedbackSuccess] = useState(false);
@@ -840,14 +825,12 @@ function NodeInspector({
         }),
       });
 
-      // 1. Guard against non-JSON error pages (404/500)
       if (!res.ok) {
         const errorText = await res.text();
         console.error(`Feedback server error (${res.status}):`, errorText);
         return;
       }
 
-      // 2. Safe to parse JSON
       const data = await res.json();
       if (data.success) {
         setFeedbackSuccess(true);
@@ -877,11 +860,11 @@ function NodeInspector({
         <div className="space-y-4">
           <div className="p-4 bg-slate-950 rounded-xl border border-slate-800">
             <span
-              className={`text-xs font-bold uppercase px-2 py-0.5 rounded border inline-block mb-1 ${selectedNode.type === 'Lead'
-                  ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
-                  : selectedNode.type === 'Worker'
-                    ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/30'
-                    : 'bg-purple-500/10 text-purple-400 border-purple-500/30'
+              className={`text-xs font-bold uppercase px-2 py-0.5 rounded border inline-block mb-1 ${selectedNode.type?.toUpperCase() === 'LEAD'
+                ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                : selectedNode.type?.toUpperCase() === 'WORKER'
+                  ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/30'
+                  : 'bg-purple-500/10 text-purple-400 border-purple-500/30'
                 }`}
             >
               {selectedNode.type}
@@ -923,7 +906,6 @@ function NodeInspector({
             onModelChange={onModelChange}
           />
 
-          {/* Investigator Action & Findings Panel */}
           <div className="border-t border-slate-800 pt-4 space-y-3">
             <button
               onClick={handleRunInvestigation}
@@ -935,7 +917,6 @@ function NodeInspector({
 
             {finding && (
               <div className="p-3 bg-purple-950/40 border border-purple-800/50 rounded-lg space-y-3 text-xs">
-                {/* Diagnosis */}
                 <div>
                   <span className="text-[10px] font-bold uppercase tracking-wider text-purple-400 block mb-1">
                     Diagnosis & Hypothesis
@@ -945,7 +926,6 @@ function NodeInspector({
                   </p>
                 </div>
 
-                {/* Key Facts */}
                 {finding.facts && finding.facts.length > 0 && (
                   <div>
                     <span className="text-[10px] font-bold uppercase tracking-wider text-purple-400 block mb-1">
@@ -953,13 +933,12 @@ function NodeInspector({
                     </span>
                     <ul className="list-disc list-inside space-y-1 text-[11px] text-slate-300">
                       {finding.facts.map((fact: string, idx: number) => (
-                        <li key={idx} className="leading-snug">{fact}</li>
+                        <li key={`fact-${idx}`} className="leading-snug">{fact}</li>
                       ))}
                     </ul>
                   </div>
                 )}
 
-                {/* Recommended Actions */}
                 {finding.recommendedActions && finding.recommendedActions.length > 0 && (
                   <div>
                     <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400 block mb-1">
@@ -967,7 +946,7 @@ function NodeInspector({
                     </span>
                     <ul className="space-y-1 text-[11px] text-amber-200 font-medium">
                       {finding.recommendedActions.map((action: string, idx: number) => (
-                        <li key={idx} className="flex items-start gap-1.5 bg-amber-950/30 p-1.5 rounded border border-amber-800/30">
+                        <li key={`action-${idx}`} className="flex items-start gap-1.5 bg-amber-950/30 p-1.5 rounded border border-amber-800/30">
                           <span className="text-amber-400 shrink-0">▸</span>
                           <span>{action}</span>
                         </li>
@@ -976,7 +955,6 @@ function NodeInspector({
                   </div>
                 )}
 
-                {/* Correct Assumption Form */}
                 <div className="pt-2 border-t border-purple-800/40 space-y-2">
                   <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-400 block">
                     ✏️ Correct This Assumption
@@ -1027,6 +1005,7 @@ function NodeInspector({
 // ============================================================================
 
 export default function Page() {
+  const user = useSession();
   const {
     nodes,
     tasks,
@@ -1034,27 +1013,23 @@ export default function Page() {
     identity,
     addNode,
     updateNode,
-    updateNodeStatus,
     deleteNode,
-    addTask,
+    assignTask: addTask,
     deleteTask,
     toggleTask,
-    user,
   } = useOrgData();
-
-  // A lead's new top-level nodes go under them, so they stay in their view
   const addScopedNode = (name: string, type: string, superiorId: string) =>
-    addNode(name, type, superiorId || (user?.role === 'lead' ? user.nodeId : ''));
+    addNode(name, type, superiorId || (user?.role?.toLowerCase() === 'lead' ? user.nodeId : ''));
 
   const [runningTaskId, setRunningTaskId] = useState<string | null>(null);
   const [agentResult, setAgentResult] = useState<string | null>(null);
-  // A lead starts with the inspector closed so their whole team row has room
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(user?.role === 'lead' ? null : 'node-1');
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(
+    user?.role?.toLowerCase() === 'lead' ? null : 'node-1'
+  );
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState('ALL');
 
-  // A lead sees their workers spread out in a row under them; the CEO keeps the compact stacks
-  const spreadWorkers = user?.role === 'lead';
+  const [spreadWorkers, setSpreadWorkers] = useState(false);
   const [homeView, setHomeView] = useState(DEFAULT_VIEW);
 
   const {
@@ -1071,7 +1046,7 @@ export default function Page() {
   } = useCanvasPanZoom(() => setSelectedNodeId(null), homeView);
 
   const containerRef = useRef<HTMLDivElement>(null);
-  
+
   const [alerts, setAlerts] = useState<any[]>([]);
   const [isScanning, setIsScanning] = useState(false);
 
@@ -1095,7 +1070,6 @@ export default function Page() {
     }
   };
 
-  // Run initial scan whenever node data changes
   useEffect(() => {
     if (nodes.length > 0) {
       handleRunOrgScan();
@@ -1108,7 +1082,6 @@ export default function Page() {
     delaySeconds: number = 0
   ) => {
     setRunningTaskId(task.id);
-    updateNodeStatus(agentNode.id, 'Busy');
     setAgentResult(null);
 
     try {
@@ -1119,6 +1092,7 @@ export default function Page() {
           agentId: agentNode.id,
           agentName: agentNode.name,
           prompt: task.title,
+          taskId: task.id,
           delaySeconds,
         }),
       });
@@ -1137,7 +1111,6 @@ export default function Page() {
       console.error('Network Error:', error);
     } finally {
       setRunningTaskId(null);
-      updateNodeStatus(agentNode.id, 'Idle');
     }
   };
 
@@ -1145,12 +1118,13 @@ export default function Page() {
     const matchedNodeIds = new Set<string>();
 
     nodes.forEach((n) => {
-      if (n.type === 'System') return;
+      if ((n.type || '').toUpperCase() === 'SYSTEM') return;
       const matchesSearch =
         !searchQuery ||
         n.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         n.id.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesType = filterType === 'ALL' || n.type === filterType;
+      const matchesType =
+        filterType === 'ALL' || (n.type || '').toUpperCase() === filterType.toUpperCase();
 
       if (matchesSearch && matchesType) {
         matchedNodeIds.add(n.id);
@@ -1166,9 +1140,14 @@ export default function Page() {
     return nodes.filter((n) => matchedNodeIds.has(n.id));
   }, [nodes, searchQuery, filterType]);
 
-  const treeLayout = useMemo(() => calculateLeadTreeLayout(filteredNodes, spreadWorkers), [filteredNodes, spreadWorkers]);
+  useEffect(() => {
+    if (nodes.length > 0) {
+      console.log('🔍 FIRST NODE:', nodes[0]);
+      console.log('🔍 ALL NODES WITH PARENTS:', nodes.map(n => ({ id: n.id, superior: n.superior, parents: n.parents })));
+    }
+  }, [nodes]);
 
-  // Zoom out once so a wide worker row fits on screen; Reset returns to this view
+  const treeLayout = useMemo(() => calculateLeadTreeLayout(filteredNodes, spreadWorkers), [filteredNodes, spreadWorkers]);
   const fittedRef = useRef(false);
   useEffect(() => {
     if (!spreadWorkers || fittedRef.current || !containerRef.current) return;
@@ -1184,15 +1163,15 @@ export default function Page() {
     setZoom(view.zoom);
     setPan(view.pan);
   }, [spreadWorkers, treeLayout, setZoom, setPan]);
+
   const selectedNode = useMemo(() => nodes.find((n) => n.id === selectedNodeId) || null, [nodes, selectedNodeId]);
 
-  // Agent token/cost spend per person: their own agents, and every agent in their team
   const { records: telemetry, defaultModel, agentModels, refresh: refreshTelemetry } = useTelemetry();
   const agentUsage = useMemo(() => usageByAgent(telemetry), [telemetry]);
   const spendByPerson = useMemo(() => {
     const spend = new Map<string, { own: UsageTotals; team: UsageTotals }>();
     for (const person of nodes) {
-      if (person.type === 'Agent') continue;
+      if ((person.type || '').toUpperCase() === 'AGENT') continue;
       spend.set(person.id, {
         own: sumTotals(ownedAgents(person.id, nodes).map((a) => a.id), agentUsage),
         team: sumTotals(teamAgentIds(person.id, nodes), agentUsage),
@@ -1222,9 +1201,9 @@ export default function Page() {
               </button>
             </div>
             <div className="space-y-1 max-h-32 overflow-y-auto">
-              {alerts.map((alert) => (
+              {alerts.map((alert, idx) => (
                 <div
-                  key={alert.id}
+                  key={`alert-${alert.id || idx}`}
                   onClick={() => setSelectedNodeId(alert.nodeId)}
                   className="p-1.5 bg-slate-950/80 rounded border border-rose-900/50 cursor-pointer hover:border-rose-500 transition-colors text-xs"
                 >
@@ -1254,7 +1233,7 @@ export default function Page() {
             <div className="grid grid-cols-4 gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800 text-xs">
               {['ALL', 'Lead', 'Worker', 'Agent'].map((type) => (
                 <button
-                  key={type}
+                  key={`filter-${type}`}
                   onClick={() => setFilterType(type)}
                   className={`py-1 rounded font-medium transition-all ${filterType === type ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'
                     }`}
@@ -1305,10 +1284,11 @@ export default function Page() {
             </defs>
             {treeLayout.lines.map((line) => {
               const midY = (line.y1 + line.y2) / 2;
-              const path = `M ${line.x1} ${line.y1} C ${line.x1} ${midY}, ${line.x2} ${midY}, ${line.x2} ${line.y2}`;
+              const x2Fixed = line.x1 === line.x2 ? line.x2 + 0.01 : line.x2;
+              const path = `M ${line.x1} ${line.y1} C ${line.x1} ${midY}, ${x2Fixed} ${midY}, ${x2Fixed} ${line.y2}`;
               return (
                 <path
-                  key={line.id}
+                  key={`tree-line-${line.id}`}
                   d={path}
                   fill="none"
                   stroke="url(#line-grad)"
@@ -1324,7 +1304,7 @@ export default function Page() {
 
             return (
               <div
-                key={node.id}
+                key={`root-node-${node.id}`}
                 style={{
                   left: `${node.x}px`,
                   top: `${node.y}px`,
@@ -1343,8 +1323,15 @@ export default function Page() {
                     }`}
                 >
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border bg-amber-500/10 text-amber-400 border-amber-500/30">
-                      {node.level === 0 ? 'Root Lead' : 'Team Lead'}
+                    <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border ${node.type?.toUpperCase() === 'WORKER'
+                        ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/30'
+                        : node.type?.toUpperCase() === 'AGENT'
+                          ? 'bg-purple-500/10 text-purple-400 border-purple-500/30'
+                          : 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                      }`}>
+                      {node.type?.toUpperCase() === 'LEAD'
+                        ? (node.level === 0 ? 'Root Lead' : 'Team Lead')
+                        : node.type}
                     </span>
                     <span className="flex items-center gap-1.5 text-[11px] text-slate-400">
                       <span className={`w-2 h-2 rounded-full ${getStatusColor(node.status).dot}`} />
@@ -1361,7 +1348,7 @@ export default function Page() {
                       </span>
                       <div className="flex items-center gap-2 overflow-x-auto max-w-[200px] p-1.5 -m-1.5">
                         {node.assignedAgents.map((agent) => (
-                          <AgentDot key={agent.id} agent={agent} onSelectAgent={(id) => setSelectedNodeId(id)} />
+                          <AgentDot key={`lead-agent-${agent.id}`} agent={agent} onSelectAgent={(id) => setSelectedNodeId(id)} />
                         ))}
                       </div>
                     </div>
@@ -1396,7 +1383,7 @@ export default function Page() {
                           const isWorkerSelected = selectedNodeId === worker.id;
                           return (
                             <div
-                              key={worker.id}
+                              key={`team-worker-${worker.id}`}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setSelectedNodeId(worker.id);
@@ -1421,7 +1408,7 @@ export default function Page() {
                                 )}
                                 {worker.assignedAgents.length > 0 ? (
                                   worker.assignedAgents.map((agent) => (
-                                    <AgentDot key={agent.id} agent={agent} onSelectAgent={(id) => setSelectedNodeId(id)} />
+                                    <AgentDot key={`tw-agent-${agent.id}`} agent={agent} onSelectAgent={(id) => setSelectedNodeId(id)} />
                                   ))
                                 ) : (
                                   <span className="text-[9px] text-slate-600 font-mono italic">no agents</span>
@@ -1437,16 +1424,6 @@ export default function Page() {
               </div>
             );
           })}
-
-          {treeLayout.workerCards.map((card) => (
-            <WorkerNodeCard
-              key={card.worker.id}
-              card={card}
-              isSelected={selectedNodeId === card.worker.id}
-              spend={spendByPerson.get(card.worker.id)?.own}
-              onSelect={setSelectedNodeId}
-            />
-          ))}
         </div>
       </main>
 
@@ -1458,7 +1435,7 @@ export default function Page() {
           runningTaskId={runningTaskId}
           agentResult={agentResult}
           onClose={() => setSelectedNodeId(null)}
-          onUpdateNode={updateNode}
+          onUpdateNode={(id, name, type, parentId, changeParent = true) => updateNode(id, name, type, parentId, changeParent)}
           onDeleteNode={deleteNode}
           onAddTask={addTask}
           onToggleTask={toggleTask}

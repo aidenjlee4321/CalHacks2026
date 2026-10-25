@@ -9,7 +9,7 @@ export default function DemoControls() {
 
   const resetDemo = useReducer(reducers.resetDemo);
   const assignTask = useReducer(reducers.assignTask);
-  const requestHelp = useReducer(reducers.requestHelp);
+  const requestApproval = useReducer(reducers.requestApproval);
 
   // The Researcher's current task (if any) and status
   const researcherTask = tasks.find((t) => t.nodeId === 'researcher' && t.status === 'IN_PROGRESS');
@@ -22,8 +22,8 @@ export default function DemoControls() {
     <div className="mb-6 flex flex-wrap items-center gap-2 rounded-xl border border-gray-200 bg-white p-3">
       <span className="mr-2 text-xs font-bold uppercase tracking-wider text-gray-500">Demo</span>
 
-      <button className={`${btn} bg-gray-100 text-gray-800`} onClick={() => resetDemo()}>
-        ↺ Reset
+      <button className={`${btn} bg-gray-100 text-gray-800`} onClick={() => resetDemo({ keepLessons: false })}>
+        Reset Demo
       </button>
 
       <button
@@ -39,10 +39,11 @@ export default function DemoControls() {
         disabled={!researcherTask || isBlocked}
         onClick={() =>
           researcherTask &&
-          requestHelp({
+          requestApproval({
             taskId: researcherTask.id,
-            question: 'Website says 500 employees, job posts suggest ~20. Which is right?',
-            context: 'Sources: acme.com/about, LinkedIn job posts',
+            action: 'Resolve Employee Count Discrepancy',
+            reason: 'Website says 500 employees, job posts suggest ~20. Which is right?',
+            details: 'Sources: acme.com/about, LinkedIn job posts',
           })
         }
       >

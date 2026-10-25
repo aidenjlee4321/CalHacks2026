@@ -3,10 +3,18 @@
 import { useState } from 'react';
 import { useTable, useReducer } from 'spacetimedb/react';
 import { tables, reducers } from '../lib/module_bindings';
+import { useSession } from '@/components/SessionProvider';
 
 export default function HumanInbox() {
-  const [handoffs] = useTable(tables.handoff);
-  const [nodes] = useTable(tables.orgNode);
+  const user = useSession();
+
+  // Destructure tuple from useTable and narrow types with Array.isArray
+  const [rawHandoffs] = useTable(tables.handoff);
+  const [rawNodes] = useTable(tables.orgNode);
+
+  const handoffs = Array.isArray(rawHandoffs) ? rawHandoffs : [];
+  const nodes = Array.isArray(rawNodes) ? rawNodes : [];
+
   const resolveHandoff = useReducer(reducers.resolveHandoff);
 
   // What the human is typing for each request
@@ -39,7 +47,7 @@ export default function HumanInbox() {
                 Assigned to: <b>{nameOf(h.assignedToId)}</b>
               </div>
 
-              <p className="mt-2 font-medium">{h.question}</p>
+              <p className="mt-2 font-medium">{h.title || h.question}</p>
               {h.context && <p className="mt-1 whitespace-pre-wrap text-sm text-gray-600">{h.context}</p>}
 
               <textarea
@@ -53,7 +61,13 @@ export default function HumanInbox() {
                 className="mt-2 w-full rounded-md bg-gray-900 px-3 py-2 text-sm font-semibold text-white disabled:opacity-40"
                 disabled={!answer.trim()}
                 onClick={() => {
-                  resolveHandoff({ handoffId: h.id, answer: answer.trim() });
+                  resolveHandoff({
+                    handoffId: h.id,
+                    byId: user?.nodeId || 'node-1',
+                    answer: answer.trim(),
+                    verdict: 'APPROVED',
+                    saveLesson: false,
+                  });
                   setAnswers((a) => ({ ...a, [key]: '' }));
                 }}
               >

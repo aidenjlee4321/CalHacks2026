@@ -12,8 +12,7 @@ import {
 
 export default __t.row({
   id: __t.u64().primaryKey(),
-  nodeId: __t.string().name("node_id"),
-  kind: __t.string(),
-  message: __t.string(),
-  createdAt: __t.timestamp().name("created_at"),
+  childId: __t.string().name("child_id"),
+  parentId: __t.string().name("parent_id"),
+  rank: __t.u32(),
 });

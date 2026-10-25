@@ -10,11 +10,9 @@ import {
   type Infer as __Infer,
 } from "spacetimedb";
 
-export default __t.row({
-  id: __t.string().primaryKey(),
+export default {
+  id: __t.string(),
   name: __t.string(),
   type: __t.string(),
-  status: __t.string(),
-  reportsToJson: __t.string().name("reports_to_json"),
-  subordinatesJson: __t.string().name("subordinates_json"),
-});
+  parentId: __t.string(),
+};

@@ -69,7 +69,7 @@ export default function AgentSpendPanel({
     };
 
     // An agent: its model and its own usage
-    if (node.type === 'Agent') {
+    if (node.type?.toUpperCase() === 'AGENT') {
         const own = byAgent.get(node.id);
         const succeeded = own ? own.runs - own.failed : 0;
         const assigned = assignedModel(node.id);

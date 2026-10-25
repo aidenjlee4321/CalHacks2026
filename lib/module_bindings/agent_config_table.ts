@@ -10,8 +10,7 @@ import {
   type Infer as __Infer,
 } from "spacetimedb";
 
-export default {
-  nodeId: __t.string(),
-  kind: __t.string(),
-  message: __t.string(),
-};
+export default __t.row({
+  agentId: __t.string().primaryKey().name("agent_id"),
+  model: __t.string(),
+});

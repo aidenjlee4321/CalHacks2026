@@ -12,12 +12,18 @@ import {
 
 export default __t.row({
   id: __t.u64().primaryKey(),
-  taskId: __t.string().name("task_id"),
+  kind: __t.string(),
   fromNodeId: __t.string().name("from_node_id"),
+  subjectNodeId: __t.string().name("subject_node_id"),
+  taskId: __t.string().name("task_id"),
   assignedToId: __t.string().name("assigned_to_id"),
+  severity: __t.string(),
+  title: __t.string(),
   question: __t.string(),
   context: __t.string(),
   status: __t.string(),
   answer: __t.string(),
+  verdict: __t.string(),
   createdAt: __t.timestamp().name("created_at"),
+  resolvedAt: __t.timestamp().name("resolved_at"),
 });

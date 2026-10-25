@@ -19,6 +19,12 @@ export const Activity = __t.object("Activity", {
 });
 export type Activity = __Infer<typeof Activity>;
 
+export const AgentConfig = __t.object("AgentConfig", {
+  agentId: __t.string(),
+  model: __t.string(),
+});
+export type AgentConfig = __Infer<typeof AgentConfig>;
+
 export const EscalationTimer = __t.object("EscalationTimer", {
   scheduledId: __t.u64(),
   scheduledAt: __t.scheduleAt(),
@@ -28,32 +34,87 @@ export type EscalationTimer = __Infer<typeof EscalationTimer>;
 
 export const Handoff = __t.object("Handoff", {
   id: __t.u64(),
-  taskId: __t.string(),
+  kind: __t.string(),
   fromNodeId: __t.string(),
+  subjectNodeId: __t.string(),
+  taskId: __t.string(),
   assignedToId: __t.string(),
+  severity: __t.string(),
+  title: __t.string(),
   question: __t.string(),
   context: __t.string(),
   status: __t.string(),
   answer: __t.string(),
+  verdict: __t.string(),
   createdAt: __t.timestamp(),
+  resolvedAt: __t.timestamp(),
 });
 export type Handoff = __Infer<typeof Handoff>;
+
+export const Lesson = __t.object("Lesson", {
+  id: __t.u64(),
+  nodeId: __t.string(),
+  triggerPattern: __t.string(),
+  correction: __t.string(),
+  approved: __t.bool(),
+  authorId: __t.string(),
+  createdAt: __t.timestamp(),
+});
+export type Lesson = __Infer<typeof Lesson>;
 
 export const OrgNode = __t.object("OrgNode", {
   id: __t.string(),
   name: __t.string(),
   type: __t.string(),
   status: __t.string(),
-  reportsToJson: __t.string(),
-  subordinatesJson: __t.string(),
 });
 export type OrgNode = __Infer<typeof OrgNode>;
 
+export const ReportsTo = __t.object("ReportsTo", {
+  id: __t.u64(),
+  childId: __t.string(),
+  parentId: __t.string(),
+  rank: __t.u32(),
+});
+export type ReportsTo = __Infer<typeof ReportsTo>;
+
+export const Settings = __t.object("Settings", {
+  key: __t.string(),
+  value: __t.string(),
+});
+export type Settings = __Infer<typeof Settings>;
+
 export const Task = __t.object("Task", {
   id: __t.string(),
+  nodeId: __t.string(),
   description: __t.string(),
   status: __t.string(),
-  nodeId: __t.string(),
+  assignedById: __t.string(),
 });
 export type Task = __Infer<typeof Task>;
+
+export const Telemetry = __t.object("Telemetry", {
+  id: __t.string(),
+  nodeId: __t.string(),
+  agentName: __t.string(),
+  taskId: __t.string(),
+  eventType: __t.string(),
+  status: __t.string(),
+  source: __t.string(),
+  model: __t.string(),
+  stopReason: __t.string(),
+  latencyMs: __t.u32(),
+  promptTokens: __t.u32(),
+  completionTokens: __t.u32(),
+  totalTokens: __t.u32(),
+  cacheReadTokens: __t.u32(),
+  cacheWriteTokens: __t.u32(),
+  costUsd: __t.f64(),
+  error: __t.string(),
+  resultText: __t.string(),
+  detailsJson: __t.string(),
+  createdAt: __t.timestamp(),
+  occurredAtMs: __t.f64(),
+});
+export type Telemetry = __Infer<typeof Telemetry>;
 

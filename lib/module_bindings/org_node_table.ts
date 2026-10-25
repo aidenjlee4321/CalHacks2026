@@ -15,6 +15,4 @@ export default __t.row({
   name: __t.string(),
   type: __t.string(),
   status: __t.string(),
-  reportsToJson: __t.string().name("reports_to_json"),
-  subordinatesJson: __t.string().name("subordinates_json"),
 });

@@ -34,22 +34,44 @@ import {
 } from "spacetimedb";
 
 // Import all reducer arg schemas
+import AddLessonReducer from "./add_lesson_reducer";
 import AddNodeReducer from "./add_node_reducer";
+import AddParentReducer from "./add_parent_reducer";
+import AddTaskReducer from "./add_task_reducer";
 import AssignTaskReducer from "./assign_task_reducer";
+import AssignTaskToReducer from "./assign_task_to_reducer";
 import CompleteTaskReducer from "./complete_task_reducer";
+import DeleteLessonReducer from "./delete_lesson_reducer";
+import DeleteNodeReducer from "./delete_node_reducer";
+import DeleteTaskReducer from "./delete_task_reducer";
 import LogActivityReducer from "./log_activity_reducer";
-import RequestHelpReducer from "./request_help_reducer";
+import MoveNodeReducer from "./move_node_reducer";
+import RecordTelemetryReducer from "./record_telemetry_reducer";
+import RemoveParentReducer from "./remove_parent_reducer";
+import ReportAnomalyReducer from "./report_anomaly_reducer";
+import RequestApprovalReducer from "./request_approval_reducer";
 import ResetDemoReducer from "./reset_demo_reducer";
 import ResolveHandoffReducer from "./resolve_handoff_reducer";
+import SetAgentModelReducer from "./set_agent_model_reducer";
+import SetLessonApprovedReducer from "./set_lesson_approved_reducer";
+import SetSettingReducer from "./set_setting_reducer";
+import SetTaskStatusReducer from "./set_task_status_reducer";
+import ToggleTaskReducer from "./toggle_task_reducer";
+import UpdateNodeReducer from "./update_node_reducer";
 import UpdateStatusReducer from "./update_status_reducer";
 
 // Import all procedure arg schemas
 
 // Import all table schema definitions
 import ActivityRow from "./activity_table";
+import AgentConfigRow from "./agent_config_table";
 import HandoffRow from "./handoff_table";
+import LessonRow from "./lesson_table";
 import OrgNodeRow from "./org_node_table";
+import ReportsToRow from "./reports_to_table";
+import SettingsRow from "./settings_table";
 import TaskRow from "./task_table";
+import TelemetryRow from "./telemetry_table";
 
 /** Type-only namespace exports for generated type groups. */
 
@@ -66,6 +88,17 @@ const tablesSchema = __schema({
       { name: 'activity_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, ActivityRow),
+  agentConfig: __table({
+    name: 'agent_config',
+    indexes: [
+      { accessor: 'agentId', name: 'agent_config_agent_id_idx_btree', algorithm: 'btree', columns: [
+        'agentId',
+      ] },
+    ],
+    constraints: [
+      { name: 'agent_config_agent_id_key', constraint: 'unique', columns: ['agentId'] },
+    ],
+  }, AgentConfigRow),
   handoff: __table({
     name: 'handoff',
     indexes: [
@@ -77,6 +110,17 @@ const tablesSchema = __schema({
       { name: 'handoff_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, HandoffRow),
+  lesson: __table({
+    name: 'lesson',
+    indexes: [
+      { accessor: 'id', name: 'lesson_id_idx_btree', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'lesson_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, LessonRow),
   orgNode: __table({
     name: 'org_node',
     indexes: [
@@ -88,6 +132,28 @@ const tablesSchema = __schema({
       { name: 'org_node_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, OrgNodeRow),
+  reportsTo: __table({
+    name: 'reports_to',
+    indexes: [
+      { accessor: 'id', name: 'reports_to_id_idx_btree', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'reports_to_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, ReportsToRow),
+  settings: __table({
+    name: 'settings',
+    indexes: [
+      { accessor: 'key', name: 'settings_key_idx_btree', algorithm: 'btree', columns: [
+        'key',
+      ] },
+    ],
+    constraints: [
+      { name: 'settings_key_key', constraint: 'unique', columns: ['key'] },
+    ],
+  }, SettingsRow),
   task: __table({
     name: 'task',
     indexes: [
@@ -99,17 +165,45 @@ const tablesSchema = __schema({
       { name: 'task_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, TaskRow),
+  telemetry: __table({
+    name: 'telemetry',
+    indexes: [
+      { accessor: 'id', name: 'telemetry_id_idx_btree', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'telemetry_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, TelemetryRow),
 });
 
 /** The schema information for all reducers in this module. This is defined the same way as the reducers would have been defined in the server, except the body of the reducer is omitted in code generation. */
 const reducersSchema = __reducers(
+  __reducerSchema("add_lesson", AddLessonReducer),
   __reducerSchema("add_node", AddNodeReducer),
+  __reducerSchema("add_parent", AddParentReducer),
+  __reducerSchema("add_task", AddTaskReducer),
   __reducerSchema("assign_task", AssignTaskReducer),
+  __reducerSchema("assign_task_to", AssignTaskToReducer),
   __reducerSchema("complete_task", CompleteTaskReducer),
+  __reducerSchema("delete_lesson", DeleteLessonReducer),
+  __reducerSchema("delete_node", DeleteNodeReducer),
+  __reducerSchema("delete_task", DeleteTaskReducer),
   __reducerSchema("log_activity", LogActivityReducer),
-  __reducerSchema("request_help", RequestHelpReducer),
+  __reducerSchema("move_node", MoveNodeReducer),
+  __reducerSchema("record_telemetry", RecordTelemetryReducer),
+  __reducerSchema("remove_parent", RemoveParentReducer),
+  __reducerSchema("report_anomaly", ReportAnomalyReducer),
+  __reducerSchema("request_approval", RequestApprovalReducer),
   __reducerSchema("reset_demo", ResetDemoReducer),
   __reducerSchema("resolve_handoff", ResolveHandoffReducer),
+  __reducerSchema("set_agent_model", SetAgentModelReducer),
+  __reducerSchema("set_lesson_approved", SetLessonApprovedReducer),
+  __reducerSchema("set_setting", SetSettingReducer),
+  __reducerSchema("set_task_status", SetTaskStatusReducer),
+  __reducerSchema("toggle_task", ToggleTaskReducer),
+  __reducerSchema("update_node", UpdateNodeReducer),
   __reducerSchema("update_status", UpdateStatusReducer),
 );
 

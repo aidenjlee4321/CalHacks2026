@@ -14,4 +14,5 @@ export default {
   id: __t.string(),
   name: __t.string(),
   type: __t.string(),
+  parentId: __t.string(),
 };

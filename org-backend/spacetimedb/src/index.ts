@@ -1,214 +1,280 @@
-import { schema, table, t, type InferSchema, type ReducerCtx } from 'spacetimedb/server';
-import { ScheduleAt } from 'spacetimedb';
+import { schema, table, t } from 'spacetimedb/server';
 
-// 1. Task Table
-const task = table(
-  { name: 'task', public: true },
-  {
-    id: t.string().primaryKey(),
-    description: t.string(),
-    status: t.string(), // 'PENDING' | 'IN_PROGRESS' | 'COMPLETED'
-    nodeId: t.string(),
+function check(condition: unknown, message: string): asserts condition {
+  if (!condition) {
+    throw new Error(message);
   }
-);
+}
 
-// 2. OrgNode Table
+const VALID_NODE_TYPES = ['LEAD', 'WORKER', 'AGENT'];
+
+// ============================================================================
+// 1. TABLE DEFINITIONS (Do NOT export tables directly)
+// ============================================================================
+
 const orgNode = table(
   { name: 'org_node', public: true },
   {
     id: t.string().primaryKey(),
     name: t.string(),
-    type: t.string(), // 'AGENT' | 'HUMAN'
-    status: t.string(), // 'IDLE' | 'WORKING' | 'BLOCKED_BY_HUMAN'
-    reportsToJson: t.string(),
-    subordinatesJson: t.string(),
+    type: t.string(),
+    status: t.string(),
   }
 );
 
-// 3. Handoff Table (agent asking a human for help)
-const handoff = table(
-  { name: 'handoff', public: true },
+const reportsTo = table(
+  { name: 'reports_to', public: true },
   {
     id: t.u64().primaryKey().autoInc(),
-    taskId: t.string(),
-    fromNodeId: t.string(),     // the stuck agent
-    assignedToId: t.string(),   // the human who must answer
-    question: t.string(),
-    context: t.string(),
-    status: t.string(),         // 'OPEN' | 'RESOLVED'
-    answer: t.string(),
-    createdAt: t.timestamp(),
+    parentId: t.string(),
+    childId: t.string(),
+    rank: t.i32(),
   }
 );
 
-// 4. Activity Table (unified feed)
-const activity = table(
-  { name: 'activity', public: true },
+const task = table(
+  { name: 'task', public: true },
   {
-    id: t.u64().primaryKey().autoInc(),
+    id: t.string().primaryKey(),
     nodeId: t.string(),
-    kind: t.string(),           // 'REASONING' | 'ACTION' | 'HUMAN' | 'SYSTEM'
-    message: t.string(),
-    createdAt: t.timestamp(),
+    assignedById: t.string(),
+    description: t.string(),
+    status: t.string(),
   }
 );
 
-// 5. Escalation timer (fires if nobody answers)
-const escalationTimer = table(
-  { name: 'escalation_timer' },
-  {
-    scheduledId: t.u64().primaryKey().autoInc(),
-    scheduledAt: t.scheduleAt(),
-    handoffId: t.u64(),
-  }
-);
+// Instantiate schema instance
+const spacetimedb = schema({ orgNode, reportsTo, task });
 
-// Register schema
-const spacetimedb = schema({ task, orgNode, handoff, activity, escalationTimer });
+// Export schema as the default export ONLY
+export default spacetimedb;
 
-// ---------- helpers (not exported) ----------
-type Ctx = ReducerCtx<InferSchema<typeof spacetimedb>>;
-const ESCALATE_AFTER_MICROS = 15_000_000n; // 60 seconds
+// ============================================================================
+// 2. BACKEND REDUCERS (ONLY reducers should be named exports)
+// ============================================================================
 
-function managerOf(ctx: Ctx, nodeId: string): string {
-  const node = ctx.db.orgNode.id.find(nodeId);
-  if (!node) return '';
-  try {
-    const ids = JSON.parse(node.reportsToJson) as string[];
-    return ids[0] ?? '';
-  } catch {
-    return '';
-  }
-}
-
-function log(ctx: Ctx, nodeId: string, kind: string, message: string) {
-  ctx.db.activity.insert({ id: 0n, nodeId, kind, message, createdAt: ctx.timestamp });
-}
-
-function setStatus(ctx: Ctx, nodeId: string, status: string) {
-  const node = ctx.db.orgNode.id.find(nodeId);
-  if (node) ctx.db.orgNode.id.update({ ...node, status });
-}
-
-function scheduleEscalation(ctx: Ctx, handoffId: bigint) {
-  ctx.db.escalationTimer.insert({
-    scheduledId: 0n,
-    scheduledAt: ScheduleAt.time(ctx.timestamp.microsSinceUnixEpoch + ESCALATE_AFTER_MICROS),
-    handoffId,
-  });
-}
-
-// ---------- reducers ----------
 export const add_node = spacetimedb.reducer(
-  { name: 'add_node' },
-  { id: t.string(), name: t.string(), type: t.string() },
-  (ctx, { id, name, type }) => {
+  { id: t.string(), name: t.string(), type: t.string(), parentId: t.string() },
+  (ctx, { id, name, type, parentId }) => {
+    const cleanType = (type || 'WORKER').toUpperCase().trim();
+    const cleanParentId = (parentId || '').trim();
+
+    check(
+      VALID_NODE_TYPES.includes(cleanType),
+      `Invalid type: ${cleanType}. Must be one of: ${VALID_NODE_TYPES.join(', ')}`
+    );
+    check(!ctx.db.orgNode.id.find(id), `Node already exists: ${id}`);
+
     ctx.db.orgNode.insert({
-      id, name, type, status: 'IDLE', reportsToJson: '[]', subordinatesJson: '[]',
+      id,
+      name: name.trim() || 'New Member',
+      type: cleanType,
+      status: 'IDLE',
     });
+
+    if (cleanParentId.length > 0 && ctx.db.orgNode.id.find(cleanParentId)) {
+      ctx.db.reportsTo.insert({
+        id: 0n,
+        parentId: cleanParentId,
+        childId: id,
+        rank: 0,
+      });
+    }
+  }
+);
+
+export const update_node = spacetimedb.reducer(
+  {
+    id: t.string(),
+    name: t.string(),
+    type: t.string(),
+    parentId: t.string(),
+    changeParent: t.bool(),
+  },
+  (ctx, { id, name, type, parentId, changeParent }) => {
+    const existing = ctx.db.orgNode.id.find(id);
+    if (!existing) {
+      throw new Error(`Node not found: ${id}`);
+    }
+
+    const cleanType = (type || existing.type).toUpperCase().trim();
+    check(
+      VALID_NODE_TYPES.includes(cleanType),
+      `Invalid type: ${cleanType}. Must be one of: ${VALID_NODE_TYPES.join(', ')}`
+    );
+
+    ctx.db.orgNode.id.update({
+      id: existing.id,
+      name: name.trim() || existing.name,
+      type: cleanType,
+      status: existing.status,
+    });
+
+    if (changeParent) {
+      for (const rel of ctx.db.reportsTo.iter()) {
+        if (rel.childId === id) {
+          ctx.db.reportsTo.id.delete(rel.id);
+        }
+      }
+
+      const cleanParentId = (parentId || '').trim();
+      if (cleanParentId.length > 0 && ctx.db.orgNode.id.find(cleanParentId)) {
+        ctx.db.reportsTo.insert({
+          id: 0n,
+          parentId: cleanParentId,
+          childId: id,
+          rank: 0,
+        });
+      }
+    }
   }
 );
 
 export const update_status = spacetimedb.reducer(
-  { name: 'update_status' },
   { id: t.string(), status: t.string() },
-  (ctx, { id, status }) => setStatus(ctx, id, status)
+  (ctx, { id, status }) => {
+    const existing = ctx.db.orgNode.id.find(id);
+    if (!existing) {
+      throw new Error(`Node not found: ${id}`);
+    }
+
+    ctx.db.orgNode.id.update({
+      id: existing.id,
+      name: existing.name,
+      type: existing.type,
+      status: (status || 'IDLE').toUpperCase().trim(),
+    });
+  }
 );
 
-export const log_activity = spacetimedb.reducer(
-  { name: 'log_activity' },
-  { nodeId: t.string(), kind: t.string(), message: t.string() },
-  (ctx, { nodeId, kind, message }) => log(ctx, nodeId, kind, message)
+export const delete_node = spacetimedb.reducer(
+  { id: t.string() },
+  (ctx, { id }) => {
+    const existing = ctx.db.orgNode.id.find(id);
+    if (!existing) return;
+
+    ctx.db.orgNode.id.delete(id);
+
+    for (const rel of ctx.db.reportsTo.iter()) {
+      if (rel.childId === id || rel.parentId === id) {
+        ctx.db.reportsTo.id.delete(rel.id);
+      }
+    }
+
+    for (const tRow of ctx.db.task.iter()) {
+      if (tRow.nodeId === id) {
+        ctx.db.task.id.delete(tRow.id);
+      }
+    }
+  }
 );
 
 export const assign_task = spacetimedb.reducer(
-  { name: 'assign_task' },
   { nodeId: t.string(), description: t.string() },
   (ctx, { nodeId, description }) => {
-    const id = `task-${ctx.timestamp.microsSinceUnixEpoch}`;
-    ctx.db.task.insert({ id, description, status: 'IN_PROGRESS', nodeId });
-    setStatus(ctx, nodeId, 'WORKING');
-    log(ctx, nodeId, 'SYSTEM', `New task: ${description}`);
+    const cleanDesc = description.trim();
+    check(cleanDesc.length > 0, 'Task description cannot be empty');
+
+    const taskId = `task-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+    const senderHex = ctx.sender ? String(ctx.sender) : '';
+
+    ctx.db.task.insert({
+      id: taskId,
+      nodeId,
+      assignedById: senderHex,
+      description: cleanDesc,
+      status: 'PENDING',
+    });
   }
 );
 
-export const complete_task = spacetimedb.reducer(
-  { name: 'complete_task' },
+export const delete_task = spacetimedb.reducer(
   { taskId: t.string() },
   (ctx, { taskId }) => {
-    const row = ctx.db.task.id.find(taskId);
-    if (!row) return;
-    ctx.db.task.id.update({ ...row, status: 'COMPLETED' });
-    setStatus(ctx, row.nodeId, 'IDLE');
-    log(ctx, row.nodeId, 'ACTION', `Completed: ${row.description}`);
+    const existing = ctx.db.task.id.find(taskId);
+    if (existing) {
+      ctx.db.task.id.delete(taskId);
+    }
   }
 );
 
-// Agent is stuck → pause it, ask its manager, start the 60s timer (one transaction)
-export const request_help = spacetimedb.reducer(
-  { name: 'request_help' },
-  { taskId: t.string(), question: t.string(), context: t.string() },
-  (ctx, { taskId, question, context }) => {
-    const row = ctx.db.task.id.find(taskId);
-    if (!row) return;
-    const managerId = managerOf(ctx, row.nodeId);
-    setStatus(ctx, row.nodeId, 'BLOCKED_BY_HUMAN');
-    const created = ctx.db.handoff.insert({
-      id: 0n, taskId, fromNodeId: row.nodeId, assignedToId: managerId,
-      question, context, status: 'OPEN', answer: '', createdAt: ctx.timestamp,
+export const toggle_task = spacetimedb.reducer(
+  { taskId: t.string() },
+  (ctx, { taskId }) => {
+    const existing = ctx.db.task.id.find(taskId);
+    if (!existing) {
+      throw new Error(`Task not found: ${taskId}`);
+    }
+
+    const newStatus = existing.status.toUpperCase() === 'COMPLETED' ? 'PENDING' : 'COMPLETED';
+
+    ctx.db.task.id.update({
+      id: existing.id,
+      nodeId: existing.nodeId,
+      assignedById: existing.assignedById,
+      description: existing.description,
+      status: newStatus,
     });
-    log(ctx, row.nodeId, 'SYSTEM', `Paused, asking ${managerId}: ${question}`);
-    scheduleEscalation(ctx, created.id);
   }
 );
 
-// Human answers → close handoff, wake the agent
-export const resolve_handoff = spacetimedb.reducer(
-  { name: 'resolve_handoff' },
-  { handoffId: t.u64(), answer: t.string() },
-  (ctx, { handoffId, answer }) => {
-    const h = ctx.db.handoff.id.find(handoffId);
-    if (!h || h.status !== 'OPEN') return;
-    ctx.db.handoff.id.update({ ...h, status: 'RESOLVED', answer });
-    setStatus(ctx, h.fromNodeId, 'WORKING');
-    log(ctx, h.assignedToId, 'HUMAN', `Answered: ${answer}`);
-  }
-);
-
-// Runs automatically 60s later; if still unanswered, move it up the org chart
-export const escalate = spacetimedb.reducer(
-  { onSchedule: escalationTimer },
-  { timer: escalationTimer.rowType },
-  (ctx, { timer }) => {
-    const h = ctx.db.handoff.id.find(timer.handoffId);
-    if (!h || h.status !== 'OPEN') return;
-    const nextId = managerOf(ctx, h.assignedToId);
-    if (!nextId) return; // already at the top
-    ctx.db.handoff.id.update({ ...h, assignedToId: nextId });
-    log(ctx, nextId, 'SYSTEM', `Escalated from ${h.assignedToId}: no answer in 15s`);
-    scheduleEscalation(ctx, h.id);
-  }
-);
-
-// Wipe everything and load the demo org
 export const reset_demo = spacetimedb.reducer(
-  { name: 'reset_demo' },
+  { keepLessons: t.bool() },
   (ctx) => {
-    for (const r of [...ctx.db.activity.iter()]) ctx.db.activity.id.delete(r.id);
-    for (const r of [...ctx.db.handoff.iter()]) ctx.db.handoff.id.delete(r.id);
-    for (const r of [...ctx.db.task.iter()]) ctx.db.task.id.delete(r.id);
-    for (const r of [...ctx.db.orgNode.iter()]) ctx.db.orgNode.id.delete(r.id);
+    for (const n of ctx.db.orgNode.iter()) {
+      ctx.db.orgNode.id.delete(n.id);
+    }
+    for (const r of ctx.db.reportsTo.iter()) {
+      ctx.db.reportsTo.id.delete(r.id);
+    }
+    for (const tRow of ctx.db.task.iter()) {
+      ctx.db.task.id.delete(tRow.id);
+    }
 
-    ctx.db.orgNode.insert({ id: 'vp', name: 'Sam (VP Sales)', type: 'HUMAN', status: 'IDLE',
-      reportsToJson: '[]', subordinatesJson: '["mgr"]' });
-    ctx.db.orgNode.insert({ id: 'mgr', name: 'Alice (Sales Manager)', type: 'HUMAN', status: 'IDLE',
-      reportsToJson: '["vp"]', subordinatesJson: '["researcher","analyst"]' });
-    ctx.db.orgNode.insert({ id: 'researcher', name: 'Researcher Agent', type: 'AGENT', status: 'IDLE',
-      reportsToJson: '["mgr"]', subordinatesJson: '[]' });
-    ctx.db.orgNode.insert({ id: 'analyst', name: 'Analyst Agent', type: 'AGENT', status: 'IDLE',
-      reportsToJson: '["mgr"]', subordinatesJson: '[]' });
-    log(ctx, 'vp', 'SYSTEM', 'Demo reset');
+    ctx.db.orgNode.insert({
+      id: 'node-1',
+      name: 'Executive Lead #001',
+      type: 'LEAD',
+      status: 'ACTIVE',
+    });
+
+    const deptLeads = [
+      { id: 'node-2', name: 'Engineering Lead #002' },
+      { id: 'node-3', name: 'Sales Lead #003' },
+      { id: 'node-4', name: 'Operations Lead #004' },
+      { id: 'node-5', name: 'Product Lead #005' },
+    ];
+
+    for (const lead of deptLeads) {
+      ctx.db.orgNode.insert({
+        id: lead.id,
+        name: lead.name,
+        type: 'LEAD',
+        status: 'ACTIVE',
+      });
+      ctx.db.reportsTo.insert({
+        id: 0n,
+        parentId: 'node-1',
+        childId: lead.id,
+        rank: 0,
+      });
+    }
+
+    for (let i = 6; i <= 10; i++) {
+      const workerId = `node-${i}`;
+      const parentLeadId = deptLeads[(i - 6) % deptLeads.length].id;
+      ctx.db.orgNode.insert({
+        id: workerId,
+        name: `Worker #${i.toString().padStart(3, '0')}`,
+        type: 'WORKER',
+        status: 'IDLE',
+      });
+      ctx.db.reportsTo.insert({
+        id: 0n,
+        parentId: parentLeadId,
+        childId: workerId,
+        rank: 0,
+      });
+    }
   }
 );
-
-export default spacetimedb;

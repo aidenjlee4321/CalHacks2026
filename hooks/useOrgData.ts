@@ -1,14 +1,15 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
-import { useSpacetimeDB } from 'spacetimedb/react';
+import { useState, useMemo } from 'react';
+import { useSpacetimeDB, useTable, useReducer } from 'spacetimedb/react';
+import { tables, reducers } from '@/lib/module_bindings';
 import { useSession } from '@/components/SessionProvider';
 import { visibleNodeIds } from '@/lib/auth';
 
-// Types
 export interface TaskItem {
     id: string;
     assignedNodeId: string;
+    assignedById?: string;
     title: string;
     completed: boolean;
 }
@@ -16,248 +17,264 @@ export interface TaskItem {
 export interface OrgNode {
     id: string;
     name: string;
-    type: 'Lead' | 'Worker' | 'Agent' | string;
-    status?: string;
+    type: 'LEAD' | 'WORKER' | 'AGENT' | string;
+    status: string;
     superior?: string;
+    parentId?: string;
+    parents: string[];
+    reportsTo: string[];
+    subordinates: string[];
+    children: string[];
+    unassigned: boolean;
     reportsToJson?: string;
     subordinatesJson?: string;
 }
 
-// Initial Base Dataset Generator
-const createBaseDataset = () => {
-    const taskTemplates = [
-        'Audit workspace security permissions',
-        'Process neural network weight batch',
-        'Optimize database index performance',
-        'Execute automated regression suite',
-        'Review architecture design proposal',
-    ];
-
-    // Agents get tasks that need the live web, so running any agent shows the Apify browse_web tool at work
-    const agentTaskTemplates = [
-        'Research the top 3 competitors of Stripe and compare their pricing',
-        'Compare the pricing plans of Notion, Coda and Airtable',
-        'Find 3 upcoming AI hackathons in the Bay Area',
-        'Summarize what Apify does in 3 bullet points',
-        'Find the latest SpacetimeDB release and summarize what changed',
-    ];
-
-    const nodes: OrgNode[] = [
-        { id: 'node-1', name: 'Executive Lead #001', type: 'Lead', status: 'Active' },
-        { id: 'node-2', name: 'Engineering Lead #002', type: 'Lead', status: 'Active', superior: 'node-1' },
-        { id: 'node-3', name: 'Sales Lead #003', type: 'Lead', status: 'Active', superior: 'node-1' },
-        { id: 'node-4', name: 'Operations Lead #004', type: 'Lead', status: 'Busy', superior: 'node-1' },
-        { id: 'node-5', name: 'Product Lead #005', type: 'Lead', status: 'Active', superior: 'node-1' },
-    ];
-
-    const leadIds = ['node-2', 'node-3', 'node-4', 'node-5'];
-
-    for (let i = 6; i <= 35; i++) {
-        nodes.push({
-            id: `node-${i}`,
-            name: `Worker #${String(i).padStart(3, '0')}`,
-            type: 'Worker',
-            status: 'Idle',
-            superior: leadIds[(i - 6) % leadIds.length],
-        });
-    }
-
-    for (let i = 36; i <= 100; i++) {
-        const superiorId = i <= 45 ? `node-${((i - 36) % 5) + 1}` : `node-${((i - 46) % 30) + 6}`;
-        nodes.push({
-            id: `node-${i}`,
-            name: `Agent #${String(i).padStart(3, '0')}`,
-            type: 'Agent',
-            status: 'Idle',
-            superior: superiorId,
-        });
-    }
-
-    const tasks: TaskItem[] = [];
-    let taskCounter = 1;
-
-    nodes.forEach((node, idx) => {
-        const taskCount = (idx % 2) + 1;
-        for (let t = 0; t < taskCount; t++) {
-            tasks.push({
-                id: `t-${taskCounter}`,
-                assignedNodeId: node.id,
-                title: `${(node.type === 'Agent' ? agentTaskTemplates : taskTemplates)[taskCounter % 5]} [Job #${taskCounter}]`,
-                completed: taskCounter % 3 === 0,
-            });
-            taskCounter++;
-        }
-    });
-
-    return { nodes, tasks };
-};
-
-const { nodes: INITIAL_NODES, tasks: INITIAL_TASKS } = createBaseDataset();
-
 export function useOrgData() {
-    // Read active connection state directly from SpacetimeDB React SDK
-    const { isActive: isConnected, identity: rawIdentity, getConnection } = useSpacetimeDB() as any;
-    const conn = typeof getConnection === 'function' ? getConnection() : null;
-    const identity = rawIdentity ? (rawIdentity.toHexString ? rawIdentity.toHexString() : String(rawIdentity)) : null;
+    const { isActive: isConnected, identity: rawIdentity } = useSpacetimeDB();
+    const identity = rawIdentity
+        ? typeof rawIdentity.toHexString === 'function'
+            ? rawIdentity.toHexString()
+            : String(rawIdentity)
+        : null;
 
-    const [demoNodes, setDemoNodes] = useState<OrgNode[]>(INITIAL_NODES);
-    const [nodes, setNodes] = useState<OrgNode[]>(INITIAL_NODES);
-    const [demoTasks, setDemoTasks] = useState<TaskItem[]>(INITIAL_TASKS);
-    const [tasks, setTasks] = useState<TaskItem[]>(INITIAL_TASKS);
+    const [error, setError] = useState<string | null>(null);
 
-    // Synchronize SpacetimeDB table subscriptions & event listeners
-    useEffect(() => {
-        if (!conn) {
-            setNodes(demoNodes);
-            setTasks(demoTasks);
-            return;
-        }
+    // 1. Live Table Subscriptions
+    const [nodeRows] = useTable(tables.orgNode);
+    const [taskRows] = useTable(tables.task);
+    const [reportsToRows] = useTable(tables.reportsTo);
 
-        // Subscribe to SpacetimeDB queries
-        if (typeof conn.subscribe === 'function') {
-            conn.subscribe([
-                'SELECT * FROM org_node',
-                'SELECT * FROM task_item',
-            ]);
-        }
+    const rawNodes = Array.isArray(nodeRows) ? nodeRows : [];
+    const rawTasks = Array.isArray(taskRows) ? taskRows : [];
+    const rawReportsTo = Array.isArray(reportsToRows) ? reportsToRows : [];
 
-        const updateNodes = () => {
-            const table = conn.db?.orgNode || conn.tables?.orgNode;
-            if (table && typeof table.iter === 'function') {
-                const rows = Array.from(table.iter()) as OrgNode[];
-                // Empty table -> keep showing the local demo org so edits stay visible
-                setNodes(rows.length > 0 ? rows.filter((r) => r.type !== 'System') : demoNodes);
+    const isReady = isConnected;
+
+    // 2. Reducer Hooks (Safe type assertion on clearData to prevent TS errors prior to generate command)
+    const addNodeReducer = useReducer(reducers.addNode);
+    const updateNodeReducer = useReducer(reducers.updateNode);
+    const updateStatusReducer = useReducer(reducers.updateStatus);
+    const deleteNodeReducer = useReducer(reducers.deleteNode);
+    const assignTaskReducer = useReducer(reducers.assignTask);
+    const deleteTaskReducer = useReducer(reducers.deleteTask);
+    const toggleTaskReducer = useReducer(reducers.toggleTask);
+    const clearDataReducer = useReducer((reducers as any).clearData || reducers.resetDemo);
+    const resetDemoReducer = useReducer(reducers.resetDemo);
+
+    // 3. Process & Deduplicate Nodes
+    const nodes: OrgNode[] = useMemo(() => {
+        const uniqueRowsMap = new Map<string, any>();
+        for (const row of rawNodes) {
+            if (row && row.id && !uniqueRowsMap.has(row.id)) {
+                uniqueRowsMap.set(row.id, row);
             }
-        };
-
-        const updateTasks = () => {
-            const table = conn.db?.taskItem || conn.db?.task || conn.tables?.task;
-            if (table && typeof table.iter === 'function') {
-                const rows = Array.from(table.iter()) as TaskItem[];
-                setTasks(rows.length > 0 ? rows : demoTasks);
-            }
-        };
-
-        // Initial table load
-        updateNodes();
-        updateTasks();
-
-        // Attach event listeners for real-time broadcasts
-        const nodeTable = conn.db?.orgNode || conn.tables?.orgNode;
-        const taskTable = conn.db?.taskItem || conn.db?.task || conn.tables?.task;
-
-        if (nodeTable?.onInsert) nodeTable.onInsert(updateNodes);
-        if (nodeTable?.onUpdate) nodeTable.onUpdate(updateNodes);
-        if (nodeTable?.onDelete) nodeTable.onDelete(updateNodes);
-
-        if (taskTable?.onInsert) taskTable.onInsert(updateTasks);
-        if (taskTable?.onUpdate) taskTable.onUpdate(updateTasks);
-        if (taskTable?.onDelete) taskTable.onDelete(updateTasks);
-
-        return () => {
-            if (nodeTable?.removeOnInsert) nodeTable.removeOnInsert(updateNodes);
-            if (nodeTable?.removeOnUpdate) nodeTable.removeOnUpdate(updateNodes);
-            if (nodeTable?.removeOnDelete) nodeTable.removeOnDelete(updateNodes);
-
-            if (taskTable?.removeOnInsert) taskTable.removeOnInsert(updateTasks);
-            if (taskTable?.removeOnUpdate) taskTable.removeOnUpdate(updateTasks);
-            if (taskTable?.removeOnDelete) taskTable.removeOnDelete(updateTasks);
-        };
-    }, [conn, demoNodes, demoTasks]);
-
-    // Mutation Methods with SpacetimeDB Reducer Calls + Fallback
-    const addNode = (name: string, type: string, superiorId: string) => {
-        const newId = crypto.randomUUID();
-        const finalName = name.trim() || 'New Member';
-        const newNode: OrgNode = { id: newId, name: finalName, type, status: 'Idle', superior: superiorId || undefined };
-
-        if (conn?.reducers?.addNode) {
-            conn.reducers.addNode(newNode);
-        } else {
-            setDemoNodes((prev) => [...prev, newNode]);
         }
-        return newId;
+        const uniqueNodes = Array.from(uniqueRowsMap.values());
+
+        return uniqueNodes
+            .filter((n: any) => (n.type || '').toUpperCase() !== 'SYSTEM')
+            .map((n: any) => {
+                const parents = rawReportsTo
+                    .filter((r: any) => String(r.parentId ?? r.parent_id ?? '') === String(n.id))
+                    .sort((a: any, b: any) => (a.rank ?? 0) - (b.rank ?? 0))
+                    .map((r: any) => String(r.childId ?? r.child_id ?? ''));
+
+                const subordinates = rawReportsTo
+                    .filter((r: any) => String(r.childId ?? r.child_id ?? '') === String(n.id))
+                    .map((r: any) => String(r.parentId ?? r.parent_id ?? ''));
+                    
+                const superior = parents[0] || undefined;
+                const typeUpper = (n.type || 'WORKER').toUpperCase();
+                const statusUpper = (n.status || 'IDLE').toUpperCase();
+                const unassigned = parents.length === 0;
+
+                return {
+                    id: n.id,
+                    name: n.name,
+                    type: typeUpper,
+                    status: statusUpper,
+                    superior,
+                    parentId: superior,
+                    parents,
+                    reportsTo: parents,
+                    subordinates,
+                    children: subordinates,
+                    unassigned,
+                    reportsToJson: JSON.stringify(parents),
+                    subordinatesJson: JSON.stringify(subordinates),
+                };
+            });
+    }, [rawNodes, rawReportsTo]);
+
+    // 4. Process & Deduplicate Tasks
+    const tasks: TaskItem[] = useMemo(() => {
+        const uniqueTasksMap = new Map<string, any>();
+        for (const row of rawTasks) {
+            if (row && row.id && !uniqueTasksMap.has(row.id)) {
+                uniqueTasksMap.set(row.id, row);
+            }
+        }
+        const uniqueTasks = Array.from(uniqueTasksMap.values());
+
+        return uniqueTasks.map((t: any) => ({
+            id: t.id,
+            assignedNodeId: t.nodeId ?? t.node_id ?? '',
+            assignedById: t.assignedById ?? t.assigned_by_id ?? undefined,
+            title: t.description || '',
+            completed: (t.status || '').toUpperCase() === 'COMPLETED',
+        }));
+    }, [rawTasks]);
+
+    // 5. Session and Visibility Scoping
+    const user = useSession();
+    const actingId = user?.nodeId || null;
+    const visibleIds = useMemo(() => visibleNodeIds(user, nodes), [user, nodes]);
+
+    const scopedNodes = useMemo(() => {
+        if (!visibleIds) return nodes;
+        const allowed = new Set(visibleIds);
+        return nodes.filter(n => allowed.has(n.id));
+    }, [nodes, visibleIds]);
+
+    const scopedTasks = useMemo(() => {
+        if (!visibleIds) return tasks;
+        const allowed = new Set(visibleIds);
+        return tasks.filter(t => allowed.has(t.assignedNodeId));
+    }, [tasks, visibleIds]);
+
+    // 6. Reducer Invocation Actions
+    const addNode = (name: string, type: string, superiorId: string = ''): string => {
+        setError(null);
+        const id = crypto.randomUUID();
+        const cleanedParentId = superiorId.trim();
+
+        addNodeReducer({
+            id,
+            name: name.trim() || 'New Member',
+            type: type.toUpperCase(),
+            parentId: cleanedParentId,
+        })
+            .then((res: any) => console.log('✅ SpacetimeDB node created:', id, res))
+            .catch((err: any) => {
+                console.error('❌ Failed to add node:', err);
+                setError(err?.message || 'Failed to create node');
+            });
+
+        return id;
     };
 
-    const updateNode = (id: string, name: string, type: string, superiorId: string) => {
-        if (conn?.reducers?.updateNode) {
-            conn.reducers.updateNode({ id, name: name.trim() || 'Unnamed Node', type, superior: superiorId || '' });
-        } else {
-            setDemoNodes((prev) =>
-                prev.map((n) => (n.id === id ? { ...n, name: name.trim() || 'Unnamed Node', type, superior: superiorId || undefined } : n))
-            );
-        }
+    const updateNode = (
+        id: string,
+        name: string,
+        type: string,
+        parentId: string,
+        changeParent: boolean
+    ) => {
+        setError(null);
+        updateNodeReducer({
+            id,
+            name: name.trim(),
+            type: type.toUpperCase(),
+            parentId: parentId.trim(),
+            changeParent,
+        })
+            .then(() => console.log('✅ SpacetimeDB node updated:', id))
+            .catch((err: any) => {
+                console.error('❌ Failed to update node:', err);
+                setError(err?.message || 'Failed to update node');
+            });
     };
 
-    const updateNodeStatus = (id: string, status: string) => {
-        if (conn?.reducers?.updateNodeStatus) {
-            conn.reducers.updateNodeStatus({ id, status });
-        } else {
-            setDemoNodes((prev) => prev.map((n) => (n.id === id ? { ...n, status } : n)));
-            setNodes((prev) => prev.map((n) => (n.id === id ? { ...n, status } : n)));
-        }
+    const updateStatus = (id: string, status: string) => {
+        setError(null);
+        updateStatusReducer({ id, status: status.toUpperCase() })
+            .then(() => console.log('✅ SpacetimeDB status updated:', id))
+            .catch((err: any) => {
+                console.error('❌ Failed to update status:', err);
+                setError(err?.message || 'Failed to update status');
+            });
     };
 
     const deleteNode = (id: string) => {
-        if (conn?.reducers?.deleteNode) {
-            conn.reducers.deleteNode({ id });
-        } else {
-            setDemoNodes((prev) => prev.filter((n) => n.id !== id));
-        }
+        setError(null);
+        deleteNodeReducer({ id })
+            .then(() => console.log('✅ SpacetimeDB node deleted:', id))
+            .catch((err: any) => {
+                console.error('❌ Failed to delete node:', err);
+                setError(err?.message || 'Failed to delete node');
+            });
     };
 
-    const addTask = (nodeId: string, title: string) => {
-        const newTask: TaskItem = { id: crypto.randomUUID(), assignedNodeId: nodeId, title, completed: false };
-        if (conn?.reducers?.addTask) {
-            conn.reducers.addTask(newTask);
-        } else {
-            setDemoTasks((prev) => [...prev, newTask]);
-        }
+    const assignTask = (nodeId: string, description: string) => {
+        setError(null);
+        assignTaskReducer({ nodeId, description: description.trim() })
+            .then(() => console.log('✅ SpacetimeDB task assigned:', nodeId))
+            .catch((err: any) => {
+                console.error('❌ Failed to assign task:', err);
+                setError(err?.message || 'Failed to assign task');
+            });
     };
 
     const deleteTask = (taskId: string) => {
-        if (conn?.reducers?.deleteTask) {
-            conn.reducers.deleteTask({ taskId });
-        } else {
-            setDemoTasks((prev) => prev.filter((t) => t.id !== taskId));
-        }
+        setError(null);
+        deleteTaskReducer({ taskId })
+            .then(() => console.log('✅ SpacetimeDB task deleted:', taskId))
+            .catch((err: any) => {
+                console.error('❌ Failed to delete task:', err);
+                setError(err?.message || 'Failed to delete task');
+            });
     };
 
     const toggleTask = (taskId: string) => {
-        if (conn?.reducers?.toggleTask) {
-            conn.reducers.toggleTask({ taskId });
-        } else {
-            setDemoTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, completed: !t.completed } : t)));
+        setError(null);
+        toggleTaskReducer({ taskId })
+            .then(() => console.log('✅ SpacetimeDB task toggled:', taskId))
+            .catch((err: any) => {
+                console.error('❌ Failed to toggle task:', err);
+                setError(err?.message || 'Failed to toggle task');
+            });
+    };
+
+    const clearData = () => {
+        setError(null);
+        if (typeof clearDataReducer === 'function') {
+            clearDataReducer({})
+                .then(() => console.log('✅ SpacetimeDB tables cleared'))
+                .catch((err: any) => {
+                    console.error('❌ Failed to clear database:', err);
+                    setError(err?.message || 'Failed to clear database');
+                });
         }
     };
 
-    // Role-based view: the CEO sees everyone, a lead only their own subtree
-    const user = useSession();
-    const visibleIds = useMemo(() => visibleNodeIds(user, nodes), [user, nodes]);
-    const scopedNodes = useMemo(
-        () => (visibleIds ? nodes.filter((n) => visibleIds.has(n.id)) : nodes),
-        [nodes, visibleIds]
-    );
-    const scopedTasks = useMemo(
-        () => (visibleIds ? tasks.filter((t) => visibleIds.has(t.assignedNodeId)) : tasks),
-        [tasks, visibleIds]
-    );
+    const resetDemo = (keepLessons: boolean = false) => {
+        setError(null);
+        resetDemoReducer({ keepLessons })
+            .then(() => console.log('✅ SpacetimeDB demo data reset'))
+            .catch((err: any) => {
+                console.error('❌ Failed to reset demo data:', err);
+                setError(err?.message || 'Failed to reset demo data');
+            });
+    };
 
     return {
+        isConnected,
+        isReady,
+        identity,
+        actingId,
+        visibleIds,
         nodes: scopedNodes,
         tasks: scopedTasks,
-        user,
-        visibleIds,
-        setNodes,
-        setTasks,
-        isConnected,
-        identity,
+        error,
         addNode,
         updateNode,
-        updateNodeStatus,
+        updateStatus,
         deleteNode,
-        addTask,
+        assignTask,
         deleteTask,
         toggleTask,
+        clearData,
+        resetDemo,
     };
 }

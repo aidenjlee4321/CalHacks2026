@@ -77,18 +77,31 @@ export function usageByAgent(records: TelemetryRecord[]): Map<string, UsageRow> 
     return byAgent;
 }
 
-export function superiorOf(node: OrgNode): string | undefined {
-    if (node.superior) return node.superior;
-    try {
-        return (JSON.parse(node.reportsToJson || '[]') as string[])[0];
-    } catch {
-        return undefined;
+export function superiorsOf(node: OrgNode): string[] {
+    if (node.superior) return [node.superior];
+    if (node.reportsToJson) {
+        try {
+            const parsed = JSON.parse(node.reportsToJson);
+            if (Array.isArray(parsed)) return parsed.map(String);
+            if (typeof parsed === 'string' && parsed) return [parsed];
+        } catch {
+            if (typeof node.reportsToJson === 'string' && node.reportsToJson) {
+                return [node.reportsToJson];
+            }
+        }
     }
+    return [];
+}
+
+export function superiorOf(node: OrgNode): string | undefined {
+    return superiorsOf(node)[0];
 }
 
 // Agents that report directly to this person
 export function ownedAgents(personId: string, nodes: OrgNode[]) {
-    return nodes.filter((n) => n.type === 'Agent' && superiorOf(n) === personId);
+    return nodes.filter(
+        (n) => n.type?.toUpperCase() === 'AGENT' && superiorsOf(n).includes(personId)
+    );
 }
 
 // Agents anywhere below this person: their own plus their reports' agents
@@ -98,13 +111,18 @@ export function teamAgentIds(personId: string, nodes: OrgNode[]) {
     while (queue.length) {
         const id = queue.shift()!;
         for (const n of nodes) {
-            if (superiorOf(n) === id && !below.has(n.id)) {
+            const sups = superiorsOf(n);
+            if (sups.includes(id) && !below.has(n.id)) {
                 below.add(n.id);
                 queue.push(n.id);
             }
         }
     }
-    return new Set(nodes.filter((n) => n.type === 'Agent' && below.has(n.id)).map((n) => n.id));
+    return new Set(
+        nodes
+            .filter((n) => n.type?.toUpperCase() === 'AGENT' && below.has(n.id))
+            .map((n) => n.id)
+    );
 }
 
 export function sumTotals(agentIds: Iterable<string>, byAgent: Map<string, UsageRow>) {
@@ -122,12 +140,21 @@ export function usageByOwner(records: TelemetryRecord[], nodes: OrgNode[]): Usag
     const byOwner = new Map<string, UsageRow>();
     for (const [agentId, row] of usageByAgent(records)) {
         const agent = nodeById.get(agentId);
-        const ownerId = agent ? superiorOf(agent) : undefined;
-        const owner = ownerId ? nodeById.get(ownerId) : undefined;
-        const key = owner?.id || 'unassigned';
-        const ownerRow = byOwner.get(key) || { key, name: owner?.name || 'Unassigned', ...emptyTotals() };
-        mergeTotals(ownerRow, row);
-        byOwner.set(key, ownerRow);
+        const ownerIds = agent ? superiorsOf(agent) : [];
+        if (ownerIds.length === 0) {
+            const key = 'unassigned';
+            const ownerRow = byOwner.get(key) || { key, name: 'Unassigned', ...emptyTotals() };
+            mergeTotals(ownerRow, row);
+            byOwner.set(key, ownerRow);
+        } else {
+            for (const ownerId of ownerIds) {
+                const owner = nodeById.get(ownerId);
+                const key = owner?.id || ownerId;
+                const ownerRow = byOwner.get(key) || { key, name: owner?.name || ownerId, ...emptyTotals() };
+                mergeTotals(ownerRow, row);
+                byOwner.set(key, ownerRow);
+            }
+        }
     }
     return [...byOwner.values()];
 }

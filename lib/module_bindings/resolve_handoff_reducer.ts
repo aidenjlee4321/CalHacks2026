@@ -12,5 +12,8 @@ import {
 
 export default {
   handoffId: __t.u64(),
+  byId: __t.string(),
   answer: __t.string(),
+  verdict: __t.string(),
+  saveLesson: __t.bool(),
 };

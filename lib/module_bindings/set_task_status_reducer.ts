@@ -11,6 +11,6 @@ import {
 } from "spacetimedb";
 
 export default {
-  handoffId: __t.u64(),
-  answer: __t.string(),
+  taskId: __t.string(),
+  status: __t.string(),
 };

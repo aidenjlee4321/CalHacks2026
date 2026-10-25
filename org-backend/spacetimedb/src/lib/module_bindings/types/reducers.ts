@@ -8,19 +8,19 @@ import { type Infer as __Infer } from "spacetimedb";
 // Import all reducer arg schemas
 import AddNodeReducer from "../add_node_reducer";
 import AssignTaskReducer from "../assign_task_reducer";
-import CompleteTaskReducer from "../complete_task_reducer";
-import LogActivityReducer from "../log_activity_reducer";
-import RequestHelpReducer from "../request_help_reducer";
+import DeleteNodeReducer from "../delete_node_reducer";
+import DeleteTaskReducer from "../delete_task_reducer";
 import ResetDemoReducer from "../reset_demo_reducer";
-import ResolveHandoffReducer from "../resolve_handoff_reducer";
+import ToggleTaskReducer from "../toggle_task_reducer";
+import UpdateNodeReducer from "../update_node_reducer";
 import UpdateStatusReducer from "../update_status_reducer";
 
 export type AddNodeParams = __Infer<typeof AddNodeReducer>;
 export type AssignTaskParams = __Infer<typeof AssignTaskReducer>;
-export type CompleteTaskParams = __Infer<typeof CompleteTaskReducer>;
-export type LogActivityParams = __Infer<typeof LogActivityReducer>;
-export type RequestHelpParams = __Infer<typeof RequestHelpReducer>;
+export type DeleteNodeParams = __Infer<typeof DeleteNodeReducer>;
+export type DeleteTaskParams = __Infer<typeof DeleteTaskReducer>;
 export type ResetDemoParams = __Infer<typeof ResetDemoReducer>;
-export type ResolveHandoffParams = __Infer<typeof ResolveHandoffReducer>;
+export type ToggleTaskParams = __Infer<typeof ToggleTaskReducer>;
+export type UpdateNodeParams = __Infer<typeof UpdateNodeReducer>;
 export type UpdateStatusParams = __Infer<typeof UpdateStatusReducer>;
 

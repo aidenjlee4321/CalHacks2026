@@ -23,6 +23,11 @@ const STATUS = {
         dot: 'bg-red-500 animate-pulse',
         label: 'Needs human',
     },
+    OFFLINE: {
+        card: 'border-gray-300 bg-gray-100 opacity-60',
+        dot: 'bg-gray-300',
+        label: 'Offline',
+    },
 };
 
 export default function TopologyMap({ nodes, rootId, highlightIds = [] }: Props) {
@@ -30,7 +35,7 @@ export default function TopologyMap({ nodes, rootId, highlightIds = [] }: Props)
     if (!node) return null;
 
     const isAgent = node.type === 'AGENT';
-    const style = STATUS[node.status];
+    const style = STATUS[node.status as keyof typeof STATUS] || STATUS.OFFLINE;
     const currentTask = node.tasks.find((t) => t.status !== 'COMPLETED');
     const mustDecide = highlightIds.includes(node.id);
 
@@ -38,9 +43,8 @@ export default function TopologyMap({ nodes, rootId, highlightIds = [] }: Props)
         <div className="flex flex-col items-center">
             {/* The Node Card */}
             <div
-                className={`w-56 rounded-xl border-2 p-3 text-left transition-all duration-500 ${
-                    mustDecide ? 'border-amber-400 bg-amber-50 ring-4 ring-amber-300 shadow-lg scale-105' : style.card
-                }`}
+                className={`w-56 rounded-xl border-2 p-3 text-left transition-all duration-500 ${mustDecide ? 'border-amber-400 bg-amber-50 ring-4 ring-amber-300 shadow-lg scale-105' : style.card
+                    }`}
             >
                 {/* Top row: type + status */}
                 <div className="flex items-center justify-between">

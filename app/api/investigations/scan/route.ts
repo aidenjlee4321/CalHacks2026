@@ -3,17 +3,24 @@ import { scanForAnomalies } from '@/lib/investigator/scanner';
 
 export async function POST(req: Request) {
     try {
-        const { nodes, tasks } = await req.json();
+        let body: { nodes?: any[]; tasks?: any[] } = {};
 
-        const alerts = scanForAnomalies(nodes || [], tasks || []);
+        // Safely parse JSON without throwing if body is empty
+        try {
+            body = await req.json();
+        } catch {
+            body = {};
+        }
 
-        return NextResponse.json({
-            success: true,
-            alertCount: alerts.length,
-            alerts,
-        });
-    } catch (err) {
-        console.error('Scan Route Error:', err);
-        return NextResponse.json({ success: false, error: String(err) }, { status: 500 });
+        const { nodes = [], tasks = [] } = body;
+
+        const alerts = scanForAnomalies(nodes, tasks);
+
+        return Response.json({ success: true, alerts });
+    } catch (error: any) {
+        return Response.json(
+            { success: false, error: error?.message || 'Internal Server Error' },
+            { status: 500 }
+        );
     }
 }
