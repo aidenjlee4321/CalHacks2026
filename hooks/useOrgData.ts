@@ -1,9 +1,23 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useSpacetimeDB } from 'spacetimedb/react';
+import { useState, useEffect, useRef } from 'react';
+import { DbConnection } from '../lib/module_bindings';
 
-// Types
+export interface OrgNode {
+    id: string;
+    name: string;
+    type: string;
+    role: string;
+    status: string;
+    superior?: string;
+    superiorId?: string;
+    parentId?: string;
+    reportsTo?: string;
+    reportsToJson?: string;
+    subordinates: string[];
+    children: OrgNode[];
+}
+
 export interface TaskItem {
     id: string;
     assignedNodeId: string;
@@ -11,228 +25,217 @@ export interface TaskItem {
     completed: boolean;
 }
 
-export interface OrgNode {
-    id: string;
-    name: string;
-    type: 'Lead' | 'Worker' | 'Agent' | string;
-    status?: string;
-    superior?: string;
-    reportsToJson?: string;
-    subordinatesJson?: string;
-}
-
-// Initial Base Dataset Generator
-const createBaseDataset = () => {
-    const taskTemplates = [
-        'Audit workspace security permissions',
-        'Process neural network weight batch',
-        'Optimize database index performance',
-        'Execute automated regression suite',
-        'Review architecture design proposal',
-    ];
-
-    const nodes: OrgNode[] = [
-        { id: 'node-1', name: 'Executive Lead #001', type: 'Lead', status: 'Active' },
-        { id: 'node-2', name: 'Engineering Lead #002', type: 'Lead', status: 'Active', superior: 'node-1' },
-        { id: 'node-3', name: 'Sales Lead #003', type: 'Lead', status: 'Active', superior: 'node-1' },
-        { id: 'node-4', name: 'Operations Lead #004', type: 'Lead', status: 'Busy', superior: 'node-1' },
-        { id: 'node-5', name: 'Product Lead #005', type: 'Lead', status: 'Active', superior: 'node-1' },
-    ];
-
-    const leadIds = ['node-2', 'node-3', 'node-4', 'node-5'];
-
-    for (let i = 6; i <= 35; i++) {
-        nodes.push({
-            id: `node-${i}`,
-            name: `Worker #${String(i).padStart(3, '0')}`,
-            type: 'Worker',
-            status: 'Idle',
-            superior: leadIds[(i - 6) % leadIds.length],
-        });
-    }
-
-    for (let i = 36; i <= 100; i++) {
-        const superiorId = i <= 45 ? `node-${((i - 36) % 5) + 1}` : `node-${((i - 46) % 30) + 6}`;
-        nodes.push({
-            id: `node-${i}`,
-            name: `Agent #${String(i).padStart(3, '0')}`,
-            type: 'Agent',
-            status: 'Idle',
-            superior: superiorId,
-        });
-    }
-
-    const tasks: TaskItem[] = [];
-    let taskCounter = 1;
-
-    nodes.forEach((node, idx) => {
-        const taskCount = (idx % 2) + 1;
-        for (let t = 0; t < taskCount; t++) {
-            tasks.push({
-                id: `t-${taskCounter}`,
-                assignedNodeId: node.id,
-                title: `${taskTemplates[taskCounter % taskTemplates.length]} [Job #${taskCounter}]`,
-                completed: taskCounter % 3 === 0,
-            });
-            taskCounter++;
-        }
-    });
-
-    return { nodes, tasks };
-};
-
-const { nodes: INITIAL_NODES, tasks: INITIAL_TASKS } = createBaseDataset();
-
 export function useOrgData() {
-    // Read active connection state directly from SpacetimeDB React SDK
-    const { isActive: isConnected, identity: rawIdentity, getConnection } = useSpacetimeDB() as any;
-    const conn = typeof getConnection === 'function' ? getConnection() : null;
-    const identity = rawIdentity ? (rawIdentity.toHexString ? rawIdentity.toHexString() : String(rawIdentity)) : null;
+    const [nodes, setNodes] = useState<OrgNode[]>([]);
+    const [tasks, setTasks] = useState<TaskItem[]>([]);
+    const [isConnected, setIsConnected] = useState<boolean>(false);
+    const [identity, setIdentity] = useState<string | null>(null);
+    const listenersAttached = useRef(false);
 
-    const [demoNodes, setDemoNodes] = useState<OrgNode[]>(INITIAL_NODES);
-    const [nodes, setNodes] = useState<OrgNode[]>(INITIAL_NODES);
-    const [demoTasks, setDemoTasks] = useState<TaskItem[]>(INITIAL_TASKS);
-    const [tasks, setTasks] = useState<TaskItem[]>(INITIAL_TASKS);
-
-    // Synchronize SpacetimeDB table subscriptions & event listeners
     useEffect(() => {
-        if (!conn) {
-            setNodes(demoNodes);
-            setTasks(demoTasks);
-            return;
-        }
+        const checkAndBindConnection = () => {
+            const conn: DbConnection | undefined = (window as any).conn;
+            if (!conn) return false;
 
-        // Subscribe to SpacetimeDB queries
-        if (typeof conn.subscribe === 'function') {
-            conn.subscribe([
-                'SELECT * FROM org_node',
-                'SELECT * FROM task_item',
-            ]);
-        }
+            setIsConnected(true);
 
-        const updateNodes = () => {
-            const table = conn.db?.orgNode || conn.tables?.orgNode;
-            if (table && typeof table.iter === 'function') {
-                const rows = Array.from(table.iter()) as OrgNode[];
-                // Empty table -> keep showing the local demo org so edits stay visible
-                setNodes(rows.length > 0 ? rows.filter((r) => r.type !== 'System') : demoNodes);
+            if (conn.identity) {
+                setIdentity(
+                    typeof conn.identity.toHexString === 'function'
+                        ? conn.identity.toHexString()
+                        : String(conn.identity)
+                );
             }
-        };
 
-        const updateTasks = () => {
-            const table = conn.db?.taskItem || conn.db?.task || conn.tables?.task;
-            if (table && typeof table.iter === 'function') {
-                const rows = Array.from(table.iter()) as TaskItem[];
-                setTasks(rows.length > 0 ? rows : demoTasks);
+            const updateNodes = () => {
+                if (conn.db?.orgNode) {
+                    const rawRows = Array.from(conn.db.orgNode.iter()) as any[];
+
+                    // 1. Extract raw nodes & resolve parent IDs
+                    const rawMapped = rawRows.map((r) => {
+                        let superior: string | undefined = undefined;
+                        const rawReports = r.reportsToJson ?? r.reports_to_json ?? '[]';
+
+                        try {
+                            const parsed = JSON.parse(rawReports);
+                            if (Array.isArray(parsed) && parsed.length > 0 && parsed[0]) {
+                                superior = String(parsed[0]);
+                            }
+                        } catch { }
+
+                        if (!superior) {
+                            const directSuperior = r.superior ?? r.superiorId ?? r.superior_id ?? r.parentId ?? r.parent_id;
+                            if (directSuperior) superior = String(directSuperior);
+                        }
+
+                        const nodeType = String(r.type || r.role || 'Worker');
+
+                        return {
+                            id: String(r.id),
+                            name: String(r.name || 'Unnamed Agent'),
+                            type: nodeType,
+                            role: nodeType,
+                            status: String(r.status || 'IDLE'),
+                            superior,
+                            superiorId: superior,
+                            parentId: superior,
+                            reportsTo: superior,
+                            reportsToJson: rawReports,
+                        };
+                    });
+
+                    // 2. Build map and attach children/subordinates cleanly
+                    const nodeMap = new Map<string, OrgNode>();
+                    rawMapped.forEach((node) => {
+                        nodeMap.set(node.id, {
+                            ...node,
+                            subordinates: [],
+                            children: [],
+                        });
+                    });
+
+                    const finalizedNodes: OrgNode[] = [];
+
+                    nodeMap.forEach((node) => {
+                        if (node.superior && nodeMap.has(node.superior)) {
+                            const parent = nodeMap.get(node.superior);
+                            if (parent) {
+                                parent.subordinates.push(node.id);
+                                parent.children.push(node);
+                            }
+                        }
+                        finalizedNodes.push(node);
+                    });
+
+                    setNodes(finalizedNodes);
+                }
+            };
+
+            const updateTasks = () => {
+                if (conn.db?.task) {
+                    const rawRows = Array.from(conn.db.task.iter()) as any[];
+                    const mapped: TaskItem[] = rawRows.map((r) => ({
+                        id: String(r.id),
+                        assignedNodeId: String(r.nodeId || r.assignedNodeId || r.assigned_node_id || ''),
+                        title: String(r.description || r.title || ''),
+                        completed: Boolean(r.completed),
+                    }));
+                    setTasks(mapped);
+                }
+            };
+
+            updateNodes();
+            updateTasks();
+
+            if (!listenersAttached.current) {
+                listenersAttached.current = true;
+                const nodeTable = conn.db?.orgNode;
+                const taskTable = conn.db?.task;
+
+                if (nodeTable) {
+                    nodeTable.onInsert(updateNodes);
+                    nodeTable.onUpdate(updateNodes);
+                    nodeTable.onDelete(updateNodes);
+                }
+
+                if (taskTable) {
+                    taskTable.onInsert(updateTasks);
+                    taskTable.onUpdate(updateTasks);
+                    taskTable.onDelete(updateTasks);
+                }
             }
+
+            return true;
         };
 
-        // Initial table load
-        updateNodes();
-        updateTasks();
+        const interval = setInterval(() => {
+            checkAndBindConnection();
+        }, 300);
 
-        // Attach event listeners for real-time broadcasts
-        const nodeTable = conn.db?.orgNode || conn.tables?.orgNode;
-        const taskTable = conn.db?.taskItem || conn.db?.task || conn.tables?.task;
+        return () => clearInterval(interval);
+    }, []);
 
-        if (nodeTable?.onInsert) nodeTable.onInsert(updateNodes);
-        if (nodeTable?.onUpdate) nodeTable.onUpdate(updateNodes);
-        if (nodeTable?.onDelete) nodeTable.onDelete(updateNodes);
+    const addNode = (name: string, type: string, superiorId: string = ''): string => {
+        const id = crypto.randomUUID();
+        const conn: DbConnection | undefined = (window as any).conn;
 
-        if (taskTable?.onInsert) taskTable.onInsert(updateTasks);
-        if (taskTable?.onUpdate) taskTable.onUpdate(updateTasks);
-        if (taskTable?.onDelete) taskTable.onDelete(updateTasks);
+        if (conn?.reducers) {
+            const reportsJsonStr = superiorId && superiorId.trim() !== ''
+                ? JSON.stringify([superiorId])
+                : '[]';
 
-        return () => {
-            if (nodeTable?.removeOnInsert) nodeTable.removeOnInsert(updateNodes);
-            if (nodeTable?.removeOnUpdate) nodeTable.removeOnUpdate(updateNodes);
-            if (nodeTable?.removeOnDelete) nodeTable.removeOnDelete(updateNodes);
-
-            if (taskTable?.removeOnInsert) taskTable.removeOnInsert(updateTasks);
-            if (taskTable?.removeOnUpdate) taskTable.removeOnUpdate(updateTasks);
-            if (taskTable?.removeOnDelete) taskTable.removeOnDelete(updateTasks);
-        };
-    }, [conn, demoNodes, demoTasks]);
-
-    // Mutation Methods with SpacetimeDB Reducer Calls + Fallback
-    const addNode = (name: string, type: string, superiorId: string) => {
-        const newId = crypto.randomUUID();
-        const finalName = name.trim() || 'New Member';
-        const newNode: OrgNode = { id: newId, name: finalName, type, status: 'Idle', superior: superiorId || undefined };
-
-        if (conn?.reducers?.addNode) {
-            conn.reducers.addNode(newNode);
-        } else {
-            setDemoNodes((prev) => [...prev, newNode]);
+            conn.reducers.addNode({
+                id,
+                name,
+                type,
+                status: 'IDLE',
+                reportsToJson: reportsJsonStr,
+                reports_to_json: reportsJsonStr,
+                subordinatesToJson: '[]',
+                subordinates_json: '[]',
+            } as any);
         }
-        return newId;
-    };
 
-    const updateNode = (id: string, name: string, type: string, superiorId: string) => {
-        if (conn?.reducers?.updateNode) {
-            conn.reducers.updateNode({ id, name: name.trim() || 'Unnamed Node', type, superior: superiorId || '' });
-        } else {
-            setDemoNodes((prev) =>
-                prev.map((n) => (n.id === id ? { ...n, name: name.trim() || 'Unnamed Node', type, superior: superiorId || undefined } : n))
-            );
-        }
+        return id;
     };
 
     const updateNodeStatus = (id: string, status: string) => {
-        if (conn?.reducers?.updateNodeStatus) {
-            conn.reducers.updateNodeStatus({ id, status });
-        } else {
-            setDemoNodes((prev) => prev.map((n) => (n.id === id ? { ...n, status } : n)));
-            setNodes((prev) => prev.map((n) => (n.id === id ? { ...n, status } : n)));
+        const conn: DbConnection | undefined = (window as any).conn;
+        if (conn?.reducers) {
+            conn.reducers.updateStatus({ id, status });
+        }
+    };
+
+    const updateNode = (id: string, name?: string, type?: string) => {
+        const conn: DbConnection | undefined = (window as any).conn;
+        if (conn?.reducers) {
+            if ((conn.reducers as any).updateNode) {
+                (conn.reducers as any).updateNode({ id, name: name || '', type: type || '' });
+            } else if (conn.reducers.updateStatus) {
+                conn.reducers.updateStatus({ id, status: type || '' });
+            }
         }
     };
 
     const deleteNode = (id: string) => {
-        if (conn?.reducers?.deleteNode) {
-            conn.reducers.deleteNode({ id });
-        } else {
-            setDemoNodes((prev) => prev.filter((n) => n.id !== id));
+        const conn: DbConnection | undefined = (window as any).conn;
+        if (conn?.reducers && (conn.reducers as any).deleteNode) {
+            (conn.reducers as any).deleteNode({ id });
         }
     };
 
-    const addTask = (nodeId: string, title: string) => {
-        const newTask: TaskItem = { id: crypto.randomUUID(), assignedNodeId: nodeId, title, completed: false };
-        if (conn?.reducers?.addTask) {
-            conn.reducers.addTask(newTask);
-        } else {
-            setDemoTasks((prev) => [...prev, newTask]);
+    const toggleTask = (id: string) => {
+        const conn: DbConnection | undefined = (window as any).conn;
+        if (conn?.reducers) {
+            conn.reducers.completeTask({ taskId: id });
         }
     };
 
-    const deleteTask = (taskId: string) => {
-        if (conn?.reducers?.deleteTask) {
-            conn.reducers.deleteTask({ taskId });
-        } else {
-            setDemoTasks((prev) => prev.filter((t) => t.id !== taskId));
+    const addTask = (assignedNodeId: string, title: string) => {
+        const conn: DbConnection | undefined = (window as any).conn;
+        if (conn?.reducers) {
+            conn.reducers.assignTask({ nodeId: assignedNodeId, description: title });
         }
     };
 
-    const toggleTask = (taskId: string) => {
-        if (conn?.reducers?.toggleTask) {
-            conn.reducers.toggleTask({ taskId });
-        } else {
-            setDemoTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, completed: !t.completed } : t)));
+    const deleteTask = (id: string) => {
+        const conn: DbConnection | undefined = (window as any).conn;
+        if (conn?.reducers && (conn.reducers as any).deleteTask) {
+            (conn.reducers as any).deleteTask({ taskId: id });
         }
     };
 
     return {
         nodes,
         tasks,
-        setNodes,
-        setTasks,
         isConnected,
         identity,
-        addNode,
-        updateNode,
         updateNodeStatus,
+        updateNode,
         deleteNode,
+        toggleTask,
         addTask,
         deleteTask,
-        toggleTask,
+        addNode,
     };
 }

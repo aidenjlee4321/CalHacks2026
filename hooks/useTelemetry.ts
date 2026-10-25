@@ -13,16 +13,22 @@ export function useTelemetry(pollMs = 5000) {
 
     useEffect(() => {
         let active = true;
-        const load = () =>
-            fetch('/api/telemetry')
-                .then((res) => res.json())
-                .then((data) => {
-                    if (!active) return;
-                    if (data.telemetry) setRecords(data.telemetry);
-                    if (data.model) setDefaultModel(data.model);
-                    if (data.agentModels) setAgentModels(data.agentModels);
-                })
-                .catch((err) => console.error('Failed to fetch telemetry:', err));
+
+        const load = async () => {
+            try {
+                const res = await fetch('/api/telemetry');
+                if (!res.ok) return;
+
+                const data = await res.json();
+                if (!active) return;
+
+                if (data.telemetry) setRecords(data.telemetry);
+                if (data.model) setDefaultModel(data.model);
+                if (data.agentModels) setAgentModels(data.agentModels);
+            } catch {
+                // Ignore network/dev-server reload errors during polling
+            }
+        };
 
         load();
         const interval = setInterval(load, pollMs);

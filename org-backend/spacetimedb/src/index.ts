@@ -1,7 +1,8 @@
 import { schema, table, t, type InferSchema, type ReducerCtx } from 'spacetimedb/server';
 import { ScheduleAt } from 'spacetimedb';
 
-// 1. Task Table
+// Tables matching lib/module_bindings + /live UI (LiveOrgChart, HumanInbox, DemoControls, …)
+
 const task = table(
   { name: 'task', public: true },
   {
@@ -12,7 +13,6 @@ const task = table(
   }
 );
 
-// 2. OrgNode Table
 const orgNode = table(
   { name: 'org_node', public: true },
   {
@@ -25,35 +25,32 @@ const orgNode = table(
   }
 );
 
-// 3. Handoff Table (agent asking a human for help)
 const handoff = table(
   { name: 'handoff', public: true },
   {
     id: t.u64().primaryKey().autoInc(),
     taskId: t.string(),
-    fromNodeId: t.string(),     // the stuck agent
-    assignedToId: t.string(),   // the human who must answer
+    fromNodeId: t.string(),
+    assignedToId: t.string(),
     question: t.string(),
     context: t.string(),
-    status: t.string(),         // 'OPEN' | 'RESOLVED'
+    status: t.string(), // 'OPEN' | 'RESOLVED'
     answer: t.string(),
     createdAt: t.timestamp(),
   }
 );
 
-// 4. Activity Table (unified feed)
 const activity = table(
   { name: 'activity', public: true },
   {
     id: t.u64().primaryKey().autoInc(),
     nodeId: t.string(),
-    kind: t.string(),           // 'REASONING' | 'ACTION' | 'HUMAN' | 'SYSTEM'
+    kind: t.string(), // 'REASONING' | 'ACTION' | 'HUMAN' | 'SYSTEM' | 'WEB'
     message: t.string(),
     createdAt: t.timestamp(),
   }
 );
 
-// 5. Escalation timer (fires if nobody answers)
 const escalationTimer = table(
   { name: 'escalation_timer' },
   {
@@ -63,12 +60,11 @@ const escalationTimer = table(
   }
 );
 
-// Register schema
 const spacetimedb = schema({ task, orgNode, handoff, activity, escalationTimer });
+export default spacetimedb;
 
-// ---------- helpers (not exported) ----------
 type Ctx = ReducerCtx<InferSchema<typeof spacetimedb>>;
-const ESCALATE_AFTER_MICROS = 15_000_000n; // 60 seconds
+const ESCALATE_AFTER_MICROS = 15_000_000n; // 15s
 
 function managerOf(ctx: Ctx, nodeId: string): string {
   const node = ctx.db.orgNode.id.find(nodeId);
@@ -98,31 +94,36 @@ function scheduleEscalation(ctx: Ctx, handoffId: bigint) {
   });
 }
 
-// ---------- reducers ----------
-export const add_node = spacetimedb.reducer(
-  { name: 'add_node' },
-  { id: t.string(), name: t.string(), type: t.string() },
-  (ctx, { id, name, type }) => {
+export const addNode = spacetimedb.reducer(
+  {
+    id: t.string(),
+    name: t.string(),
+    type: t.string(),
+    reportsToJson: t.string(),
+  },
+  (ctx, { id, name, type, reportsToJson }) => {
     ctx.db.orgNode.insert({
-      id, name, type, status: 'IDLE', reportsToJson: '[]', subordinatesJson: '[]',
+      id,
+      name,
+      type,
+      status: 'IDLE',
+      reportsToJson: reportsToJson || '[]',
+      subordinatesJson: '[]',
     });
   }
 );
 
-export const update_status = spacetimedb.reducer(
-  { name: 'update_status' },
+export const updateStatus = spacetimedb.reducer(
   { id: t.string(), status: t.string() },
   (ctx, { id, status }) => setStatus(ctx, id, status)
 );
 
-export const log_activity = spacetimedb.reducer(
-  { name: 'log_activity' },
+export const logActivity = spacetimedb.reducer(
   { nodeId: t.string(), kind: t.string(), message: t.string() },
   (ctx, { nodeId, kind, message }) => log(ctx, nodeId, kind, message)
 );
 
-export const assign_task = spacetimedb.reducer(
-  { name: 'assign_task' },
+export const assignTask = spacetimedb.reducer(
   { nodeId: t.string(), description: t.string() },
   (ctx, { nodeId, description }) => {
     const id = `task-${ctx.timestamp.microsSinceUnixEpoch}`;
@@ -132,8 +133,7 @@ export const assign_task = spacetimedb.reducer(
   }
 );
 
-export const complete_task = spacetimedb.reducer(
-  { name: 'complete_task' },
+export const completeTask = spacetimedb.reducer(
   { taskId: t.string() },
   (ctx, { taskId }) => {
     const row = ctx.db.task.id.find(taskId);
@@ -144,9 +144,7 @@ export const complete_task = spacetimedb.reducer(
   }
 );
 
-// Agent is stuck → pause it, ask its manager, start the 60s timer (one transaction)
-export const request_help = spacetimedb.reducer(
-  { name: 'request_help' },
+export const requestHelp = spacetimedb.reducer(
   { taskId: t.string(), question: t.string(), context: t.string() },
   (ctx, { taskId, question, context }) => {
     const row = ctx.db.task.id.find(taskId);
@@ -154,17 +152,22 @@ export const request_help = spacetimedb.reducer(
     const managerId = managerOf(ctx, row.nodeId);
     setStatus(ctx, row.nodeId, 'BLOCKED_BY_HUMAN');
     const created = ctx.db.handoff.insert({
-      id: 0n, taskId, fromNodeId: row.nodeId, assignedToId: managerId,
-      question, context, status: 'OPEN', answer: '', createdAt: ctx.timestamp,
+      id: 0n,
+      taskId,
+      fromNodeId: row.nodeId,
+      assignedToId: managerId,
+      question,
+      context,
+      status: 'OPEN',
+      answer: '',
+      createdAt: ctx.timestamp,
     });
     log(ctx, row.nodeId, 'SYSTEM', `Paused, asking ${managerId}: ${question}`);
     scheduleEscalation(ctx, created.id);
   }
 );
 
-// Human answers → close handoff, wake the agent
-export const resolve_handoff = spacetimedb.reducer(
-  { name: 'resolve_handoff' },
+export const resolveHandoff = spacetimedb.reducer(
   { handoffId: t.u64(), answer: t.string() },
   (ctx, { handoffId, answer }) => {
     const h = ctx.db.handoff.id.find(handoffId);
@@ -175,7 +178,6 @@ export const resolve_handoff = spacetimedb.reducer(
   }
 );
 
-// Runs automatically 60s later; if still unanswered, move it up the org chart
 export const escalate = spacetimedb.reducer(
   { onSchedule: escalationTimer },
   { timer: escalationTimer.rowType },
@@ -183,32 +185,50 @@ export const escalate = spacetimedb.reducer(
     const h = ctx.db.handoff.id.find(timer.handoffId);
     if (!h || h.status !== 'OPEN') return;
     const nextId = managerOf(ctx, h.assignedToId);
-    if (!nextId) return; // already at the top
+    if (!nextId) return;
     ctx.db.handoff.id.update({ ...h, assignedToId: nextId });
     log(ctx, nextId, 'SYSTEM', `Escalated from ${h.assignedToId}: no answer in 15s`);
     scheduleEscalation(ctx, h.id);
   }
 );
 
-// Wipe everything and load the demo org
-export const reset_demo = spacetimedb.reducer(
-  { name: 'reset_demo' },
-  (ctx) => {
-    for (const r of [...ctx.db.activity.iter()]) ctx.db.activity.id.delete(r.id);
-    for (const r of [...ctx.db.handoff.iter()]) ctx.db.handoff.id.delete(r.id);
-    for (const r of [...ctx.db.task.iter()]) ctx.db.task.id.delete(r.id);
-    for (const r of [...ctx.db.orgNode.iter()]) ctx.db.orgNode.id.delete(r.id);
+export const resetDemo = spacetimedb.reducer((ctx) => {
+  for (const r of [...ctx.db.activity.iter()]) ctx.db.activity.id.delete(r.id);
+  for (const r of [...ctx.db.handoff.iter()]) ctx.db.handoff.id.delete(r.id);
+  for (const r of [...ctx.db.task.iter()]) ctx.db.task.id.delete(r.id);
+  for (const r of [...ctx.db.orgNode.iter()]) ctx.db.orgNode.id.delete(r.id);
 
-    ctx.db.orgNode.insert({ id: 'vp', name: 'Sam (VP Sales)', type: 'HUMAN', status: 'IDLE',
-      reportsToJson: '[]', subordinatesJson: '["mgr"]' });
-    ctx.db.orgNode.insert({ id: 'mgr', name: 'Alice (Sales Manager)', type: 'HUMAN', status: 'IDLE',
-      reportsToJson: '["vp"]', subordinatesJson: '["researcher","analyst"]' });
-    ctx.db.orgNode.insert({ id: 'researcher', name: 'Researcher Agent', type: 'AGENT', status: 'IDLE',
-      reportsToJson: '["mgr"]', subordinatesJson: '[]' });
-    ctx.db.orgNode.insert({ id: 'analyst', name: 'Analyst Agent', type: 'AGENT', status: 'IDLE',
-      reportsToJson: '["mgr"]', subordinatesJson: '[]' });
-    log(ctx, 'vp', 'SYSTEM', 'Demo reset');
-  }
-);
-
-export default spacetimedb;
+  ctx.db.orgNode.insert({
+    id: 'vp',
+    name: 'Sam (VP Sales)',
+    type: 'HUMAN',
+    status: 'IDLE',
+    reportsToJson: '[]',
+    subordinatesJson: '["mgr"]',
+  });
+  ctx.db.orgNode.insert({
+    id: 'mgr',
+    name: 'Alice (Sales Manager)',
+    type: 'HUMAN',
+    status: 'IDLE',
+    reportsToJson: '["vp"]',
+    subordinatesJson: '["researcher","analyst"]',
+  });
+  ctx.db.orgNode.insert({
+    id: 'researcher',
+    name: 'Researcher Agent',
+    type: 'AGENT',
+    status: 'IDLE',
+    reportsToJson: '["mgr"]',
+    subordinatesJson: '[]',
+  });
+  ctx.db.orgNode.insert({
+    id: 'analyst',
+    name: 'Analyst Agent',
+    type: 'AGENT',
+    status: 'IDLE',
+    reportsToJson: '["mgr"]',
+    subordinatesJson: '[]',
+  });
+  log(ctx, 'vp', 'SYSTEM', 'Demo reset');
+});

@@ -10,17 +10,20 @@ export default function LiveSpacetimeProvider({ children }: { children: React.Re
   useEffect(() => setMounted(true), []);
 
   const connectionBuilder = useMemo(() => {
-    const rawHost = process.env.NEXT_PUBLIC_SPACETIMEDB_HOST || 'ws://127.0.0.1:3000';
-    const dbName = process.env.NEXT_PUBLIC_SPACETIMEDB_MODULE || 'spacetime-org';
+    const rawHost =
+      process.env.NEXT_PUBLIC_SPACETIMEDB_HOST ||
+      process.env.NEXT_PUBLIC_SPACETIMEDB_URI ||
+      'wss://maincloud.spacetimedb.com';
+    const dbName =
+      process.env.NEXT_PUBLIC_SPACETIMEDB_MODULE ||
+      process.env.NEXT_PUBLIC_SPACETIMEDB_NAME ||
+      'org-backend-afa0s-v2';
 
-    // Ensure the connection URI uses the WebSocket protocol (ws:// or wss://)
     const wsUri = rawHost.startsWith('http')
       ? rawHost.replace(/^http/, 'ws')
       : rawHost;
 
-    return DbConnection.builder()
-      .withUri(wsUri)
-      .withDatabaseName(dbName);
+    return DbConnection.builder().withUri(wsUri).withDatabaseName(dbName);
   }, []);
 
   if (!mounted) return null;

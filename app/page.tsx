@@ -38,12 +38,18 @@ export interface TreeLine {
 // ============================================================================
 
 export function parseSuperior(node: OrgNode): string | null {
-  if (node.superior) return node.superior;
+  if (node.superior && typeof node.superior === 'string') return node.superior;
   if (node.reportsToJson) {
     try {
-      return JSON.parse(node.reportsToJson);
+      const parsed = JSON.parse(node.reportsToJson);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return String(parsed[0]);
+      }
+      if (typeof parsed === 'string') return parsed;
     } catch {
-      return node.reportsToJson;
+      if (typeof node.reportsToJson === 'string' && node.reportsToJson.trim() !== '') {
+        return node.reportsToJson;
+      }
     }
   }
   return null;
