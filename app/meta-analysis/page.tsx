@@ -7,6 +7,7 @@ import { DEMO_AGENT_TASKS } from '@/lib/demoAgents';
 import { agentRuns, usageByOwner } from '@/lib/agentUsage';
 import { shortModelName } from '@/lib/agentModels';
 import { useOrgData } from '@/hooks/useOrgData';
+import UserMenu from '@/components/UserMenu';
 import {
     CumulativeCostChart,
     Legend,
@@ -92,17 +93,20 @@ export default function MetaAnalysisPage() {
         fetchTelemetry();
     };
 
+    // A lead only sees runs from agents in their own team
+    const { nodes, visibleIds } = useOrgData();
+
     // Agent runs only (oldest → newest), scoped by the source filter
     const runs = useMemo(
         () =>
             agentRuns(telemetry)
+                .filter((r) => !visibleIds || visibleIds.has(r.agentId || ''))
                 .filter((r) => sourceFilter === 'all' || (r.source || 'manual') === sourceFilter)
                 .sort((a, b) => Number(a.timestamp) - Number(b.timestamp)),
-        [telemetry, sourceFilter]
+        [telemetry, sourceFilter, visibleIds]
     );
 
     // Each agent's spend rolled up to the person it reports to
-    const { nodes } = useOrgData();
     const ownerRows = useMemo(() => usageByOwner(runs, nodes), [runs, nodes]);
 
     // Aggregated Analytics
@@ -135,12 +139,15 @@ export default function MetaAnalysisPage() {
                             Tokens, cost and latency for every Claude call your agents make
                         </p>
                     </div>
-                    <Link
-                        href="/"
-                        className="px-4 py-2 bg-slate-900 border border-slate-800 hover:border-slate-700 text-xs text-slate-300 font-medium rounded-lg transition-colors"
-                    >
-                        ← Back to Org Tree
-                    </Link>
+                    <div className="flex items-center gap-4">
+                        <UserMenu compact />
+                        <Link
+                            href="/"
+                            className="px-4 py-2 bg-slate-900 border border-slate-800 hover:border-slate-700 text-xs text-slate-300 font-medium rounded-lg transition-colors"
+                        >
+                            ← Back to Org Tree
+                        </Link>
+                    </div>
                 </div>
 
                 {/* Filters & actions */}
