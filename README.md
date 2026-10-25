@@ -6,6 +6,17 @@
 
 Companies are starting to staff teams with a mix of people and AI agents. Spacetime Org models that org as one hierarchy. **Leads** manage **Workers**, and Workers manage **Agents**. You can see who reports to whom, hand tasks to agents, run those agents against Claude, and track how they're performing.
 
+## Demo logins
+
+Every page sits behind a login (`/login`). The role decides what you see:
+
+| Account | Email | Password | Sees |
+| --- | --- | --- | --- |
+| CEO (Avery Chen) | `ceo@spacetime.org` | `ceo-demo` | The whole org |
+| Engineering Lead (Sam Patel) | `lead@spacetime.org` | `lead-demo` | Only their own workers and agents |
+
+The scoping lives in `useOrgData`, so the org tree, Worker Workspace, and AI Usage page all respect it. Sessions are an HMAC-signed cookie (`lib/session.ts`); set `AUTH_SECRET` in production. Accounts are in `lib/auth.ts`.
+
 ## Features
 
 - **Org topology dashboard** (`/`): a pannable, zoomable tree of Leads → Workers → Agents.

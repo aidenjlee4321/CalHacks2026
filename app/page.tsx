@@ -6,6 +6,7 @@ import { useOrgData, OrgNode, TaskItem } from '@/hooks/useOrgData';
 import { useTelemetry } from '@/hooks/useTelemetry';
 import { UsageRow, UsageTotals, ownedAgents, sumTotals, teamAgentIds, usageByAgent } from '@/lib/agentUsage';
 import AgentSpendPanel from '@/components/AgentSpendPanel';
+import UserMenu from '@/components/UserMenu';
 import { formatCompact, formatUsd } from '@/components/UsageCharts';
 
 // ============================================================================
@@ -65,8 +66,24 @@ export function getDescendants(startId: string, nodes: OrgNode[]): Set<string> {
   return descendants;
 }
 
-export function calculateLeadTreeLayout(filteredNodes: OrgNode[]) {
-  if (filteredNodes.length === 0) return { rootNodes: [], lines: [] };
+export interface WorkerCard {
+  worker: WorkerWithAgents;
+  x: number;
+  y: number;
+}
+
+export const NODE_WIDTH = 360;
+export const WORKER_WIDTH = 150;
+const WORKER_GAP = 16;
+const WORKER_ROW_OFFSET = 230; // lead card top → worker row top
+const LEAD_CARD_BOTTOM = 140; // where connector lines leave a lead card
+
+const workerRowWidth = (count: number) => (count ? count * WORKER_WIDTH + (count - 1) * WORKER_GAP : 0);
+
+// spreadWorkers: each worker gets its own card in a row under its lead (the lead's view),
+// instead of a stacked list inside the lead's panel (the CEO's view)
+export function calculateLeadTreeLayout(filteredNodes: OrgNode[], spreadWorkers = false) {
+  if (filteredNodes.length === 0) return { rootNodes: [], lines: [], workerCards: [] };
 
   const nodeMap = new Map<string, OrgNode>();
   filteredNodes.forEach((n) => nodeMap.set(n.id, n));
@@ -126,7 +143,6 @@ export function calculateLeadTreeLayout(filteredNodes: OrgNode[]) {
 
   const extendedRoots = rootLeads.map((r) => buildExtendedLead(r, 0));
 
-  const NODE_WIDTH = 360;
   const LEVEL_HEIGHT = 520;
   const HORIZONTAL_GAP = 80;
 
@@ -137,8 +153,10 @@ export function calculateLeadTreeLayout(filteredNodes: OrgNode[]) {
     node.y = level * LEVEL_HEIGHT + 80;
 
     if (node.childrenNodes.length === 0) {
-      node.x = currentX;
-      currentX += NODE_WIDTH + HORIZONTAL_GAP;
+      // A spread-out worker row can be wider than the lead card; center the card over it
+      const width = spreadWorkers ? Math.max(NODE_WIDTH, workerRowWidth(node.teamWorkers.length)) : NODE_WIDTH;
+      node.x = currentX + (width - NODE_WIDTH) / 2;
+      currentX += width + HORIZONTAL_GAP;
       return node.x;
     }
 
@@ -155,6 +173,7 @@ export function calculateLeadTreeLayout(filteredNodes: OrgNode[]) {
 
   const flattenedLeads: ExtendedLeadNode[] = [];
   const lines: TreeLine[] = [];
+  const workerCards: WorkerCard[] = [];
 
   const traverse = (node: ExtendedLeadNode) => {
     flattenedLeads.push(node);
@@ -162,17 +181,34 @@ export function calculateLeadTreeLayout(filteredNodes: OrgNode[]) {
       lines.push({
         id: `${node.id}-${child.id}`,
         x1: node.x + NODE_WIDTH / 2,
-        y1: node.y + 140,
+        y1: node.y + LEAD_CARD_BOTTOM,
         x2: child.x + NODE_WIDTH / 2,
         y2: child.y,
       });
       traverse(child);
     });
+
+    if (spreadWorkers) {
+      const centerX = node.x + NODE_WIDTH / 2;
+      const rowStart = centerX - workerRowWidth(node.teamWorkers.length) / 2;
+      node.teamWorkers.forEach((worker, i) => {
+        const x = rowStart + i * (WORKER_WIDTH + WORKER_GAP);
+        const y = node.y + WORKER_ROW_OFFSET;
+        workerCards.push({ worker, x, y });
+        lines.push({
+          id: `${node.id}-${worker.id}`,
+          x1: centerX,
+          y1: node.y + LEAD_CARD_BOTTOM,
+          x2: x + WORKER_WIDTH / 2,
+          y2: y,
+        });
+      });
+    }
   };
 
   extendedRoots.forEach(traverse);
 
-  return { rootNodes: flattenedLeads, lines };
+  return { rootNodes: flattenedLeads, lines, workerCards };
 }
 
 export function getStatusColor(status?: string) {
@@ -209,9 +245,11 @@ export function getStatusColor(status?: string) {
 // 3. UI CANVAS HOOKS
 // ============================================================================
 
-function useCanvasPanZoom(onDeselect: () => void) {
-  const [zoom, setZoom] = useState(1);
-  const [pan, setPan] = useState({ x: 80, y: 40 });
+const DEFAULT_VIEW = { zoom: 1, pan: { x: 80, y: 40 } };
+
+function useCanvasPanZoom(onDeselect: () => void, homeView = DEFAULT_VIEW) {
+  const [zoom, setZoom] = useState(homeView.zoom);
+  const [pan, setPan] = useState(homeView.pan);
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const dragDistance = useRef(0);
@@ -245,14 +283,15 @@ function useCanvasPanZoom(onDeselect: () => void) {
   };
 
   const resetView = () => {
-    setZoom(1);
-    setPan({ x: 80, y: 40 });
+    setZoom(homeView.zoom);
+    setPan(homeView.pan);
   };
 
   return {
     zoom,
     setZoom,
     pan,
+    setPan,
     isDragging,
     handleMouseDown,
     handleMouseMove,
@@ -305,6 +344,8 @@ function SidebarHeader({ isConnected, identity }: { isConnected: boolean; identi
             ⚡ Live
           </Link>
         </div>
+
+        <UserMenu />
       </header>
 
       {identity && (
@@ -494,6 +535,60 @@ function AgentDot({
         aria-label={agent.name}
         className={`w-3.5 h-3.5 rounded-full border ${colors.dot} cursor-pointer shadow-sm transition-all duration-200 ease-out hover:scale-125 hover:ring-2 hover:ring-indigo-400/80 hover:ring-offset-2 hover:ring-offset-slate-900 hover:shadow-[0_0_12px_rgba(129,140,248,0.7)] active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400`}
       />
+    </div>
+  );
+}
+
+function WorkerNodeCard({
+  card,
+  isSelected,
+  spend,
+  onSelect,
+}: {
+  card: WorkerCard;
+  isSelected: boolean;
+  spend?: UsageTotals;
+  onSelect: (id: string) => void;
+}) {
+  const { worker } = card;
+  return (
+    <div
+      style={{ left: `${card.x}px`, top: `${card.y}px`, width: `${WORKER_WIDTH}px` }}
+      onClick={(e) => {
+        e.stopPropagation();
+        onSelect(worker.id);
+      }}
+      className={`interactive-card absolute pointer-events-auto cursor-pointer rounded-xl p-3 transition-all duration-200 border shadow-xl ${isSelected
+        ? 'bg-indigo-950/90 border-indigo-500 shadow-indigo-500/25 ring-2 ring-indigo-500/50 scale-[1.03] z-10'
+        : 'bg-slate-900/95 border-slate-800 hover:border-slate-700 hover:bg-slate-900'
+        }`}
+    >
+      <div className="flex items-center justify-between mb-1.5">
+        <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full border bg-indigo-500/10 text-indigo-400 border-indigo-500/30">
+          Worker
+        </span>
+        <span className="flex items-center gap-1 text-[10px] text-slate-400">
+          <span className={`w-1.5 h-1.5 rounded-full ${getStatusColor(worker.status).dot}`} />
+          {worker.status || 'Idle'}
+        </span>
+      </div>
+
+      <h4 className="font-semibold text-slate-100 text-xs truncate">{worker.name}</h4>
+
+      <div className="mt-2 pt-2 border-t border-slate-800/80 flex items-center justify-between gap-2">
+        {worker.assignedAgents.length > 0 ? (
+          <div className="flex items-center gap-1.5 p-1 -m-1 overflow-x-auto">
+            {worker.assignedAgents.map((agent) => (
+              <AgentDot key={agent.id} agent={agent} onSelectAgent={onSelect} />
+            ))}
+          </div>
+        ) : (
+          <span className="text-[9px] text-slate-600 font-mono italic">no agents</span>
+        )}
+        {(spend?.runs ?? 0) > 0 && (
+          <span className="text-[10px] tabular-nums text-slate-400 shrink-0">{formatUsd(spend!.cost)}</span>
+        )}
+      </div>
     </div>
   );
 }
@@ -944,25 +1039,36 @@ export default function Page() {
     addTask,
     deleteTask,
     toggleTask,
+    user,
   } = useOrgData();
+
+  // A lead's new top-level nodes go under them, so they stay in their view
+  const addScopedNode = (name: string, type: string, superiorId: string) =>
+    addNode(name, type, superiorId || (user?.role === 'lead' ? user.nodeId : ''));
 
   const [runningTaskId, setRunningTaskId] = useState<string | null>(null);
   const [agentResult, setAgentResult] = useState<string | null>(null);
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>('node-1');
+  // A lead starts with the inspector closed so their whole team row has room
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(user?.role === 'lead' ? null : 'node-1');
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState('ALL');
+
+  // A lead sees their workers spread out in a row under them; the CEO keeps the compact stacks
+  const spreadWorkers = user?.role === 'lead';
+  const [homeView, setHomeView] = useState(DEFAULT_VIEW);
 
   const {
     zoom,
     setZoom,
     pan,
+    setPan,
     isDragging,
     handleMouseDown,
     handleMouseMove,
     handleMouseUp,
     handleWheel,
     resetView,
-  } = useCanvasPanZoom(() => setSelectedNodeId(null));
+  } = useCanvasPanZoom(() => setSelectedNodeId(null), homeView);
 
   const containerRef = useRef<HTMLDivElement>(null);
   
@@ -1060,7 +1166,24 @@ export default function Page() {
     return nodes.filter((n) => matchedNodeIds.has(n.id));
   }, [nodes, searchQuery, filterType]);
 
-  const treeLayout = useMemo(() => calculateLeadTreeLayout(filteredNodes), [filteredNodes]);
+  const treeLayout = useMemo(() => calculateLeadTreeLayout(filteredNodes, spreadWorkers), [filteredNodes, spreadWorkers]);
+
+  // Zoom out once so a wide worker row fits on screen; Reset returns to this view
+  const fittedRef = useRef(false);
+  useEffect(() => {
+    if (!spreadWorkers || fittedRef.current || !containerRef.current) return;
+    const { workerCards, rootNodes } = treeLayout;
+    if (workerCards.length === 0) return;
+    const minX = Math.min(...workerCards.map((c) => c.x), ...rootNodes.map((n) => n.x));
+    const maxX = Math.max(...workerCards.map((c) => c.x + WORKER_WIDTH), ...rootNodes.map((n) => n.x + NODE_WIDTH));
+    const margin = 48;
+    const fitZoom = Math.min(1, (containerRef.current.clientWidth - margin * 2) / (maxX - minX));
+    const view = { zoom: fitZoom, pan: { x: margin - minX * fitZoom, y: 40 } };
+    fittedRef.current = true;
+    setHomeView(view);
+    setZoom(view.zoom);
+    setPan(view.pan);
+  }, [spreadWorkers, treeLayout, setZoom, setPan]);
   const selectedNode = useMemo(() => nodes.find((n) => n.id === selectedNodeId) || null, [nodes, selectedNodeId]);
 
   // Agent token/cost spend per person: their own agents, and every agent in their team
@@ -1142,7 +1265,7 @@ export default function Page() {
             </div>
           </div>
 
-          <AddNodeForm nodes={nodes} onAddNode={addNode} onSelectNode={(id) => setSelectedNodeId(id)} />
+          <AddNodeForm nodes={nodes} onAddNode={addScopedNode} onSelectNode={(id) => setSelectedNodeId(id)} />
         </div>
       </aside>
 
@@ -1256,7 +1379,7 @@ export default function Page() {
                   )}
                 </div>
 
-                {node.teamWorkers && node.teamWorkers.length > 0 && (
+                {!spreadWorkers && node.teamWorkers && node.teamWorkers.length > 0 && (
                   <>
                     <div className="w-0.5 h-4 bg-gradient-to-b from-indigo-500 to-purple-500 opacity-70" />
 
@@ -1314,6 +1437,16 @@ export default function Page() {
               </div>
             );
           })}
+
+          {treeLayout.workerCards.map((card) => (
+            <WorkerNodeCard
+              key={card.worker.id}
+              card={card}
+              isSelected={selectedNodeId === card.worker.id}
+              spend={spendByPerson.get(card.worker.id)?.own}
+              onSelect={setSelectedNodeId}
+            />
+          ))}
         </div>
       </main>
 

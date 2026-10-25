@@ -4,6 +4,7 @@ import React, { useState, useMemo } from 'react';
 import Link from 'next/link';
 import { useOrgData } from '@/hooks/useOrgData'; // Uses existing hook
 import { getStatusColor } from '@/app/page';
+import UserMenu from '@/components/UserMenu';
 
 export default function WorkerPortalPage() {
     const { nodes, tasks, updateNodeStatus, toggleTask, addTask } = useOrgData();
@@ -96,12 +97,15 @@ export default function WorkerPortalPage() {
                         </select>
                     </div>
 
-                    <Link
-                        href="/"
-                        className="px-3 py-1.5 text-xs bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-lg text-slate-300 transition-colors"
-                    >
-                        ← Back to Org Tree
-                    </Link>
+                    <div className="flex items-center gap-4">
+                        <UserMenu compact />
+                        <Link
+                            href="/"
+                            className="px-3 py-1.5 text-xs bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-lg text-slate-300 transition-colors"
+                        >
+                            ← Back to Org Tree
+                        </Link>
+                    </div>
                 </header>
 
                 {/* Status Bar */}

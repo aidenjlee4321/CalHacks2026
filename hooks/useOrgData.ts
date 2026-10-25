@@ -1,7 +1,9 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useSpacetimeDB } from 'spacetimedb/react';
+import { useSession } from '@/components/SessionProvider';
+import { visibleNodeIds } from '@/lib/auth';
 
 // Types
 export interface TaskItem {
@@ -229,9 +231,23 @@ export function useOrgData() {
         }
     };
 
+    // Role-based view: the CEO sees everyone, a lead only their own subtree
+    const user = useSession();
+    const visibleIds = useMemo(() => visibleNodeIds(user, nodes), [user, nodes]);
+    const scopedNodes = useMemo(
+        () => (visibleIds ? nodes.filter((n) => visibleIds.has(n.id)) : nodes),
+        [nodes, visibleIds]
+    );
+    const scopedTasks = useMemo(
+        () => (visibleIds ? tasks.filter((t) => visibleIds.has(t.assignedNodeId)) : tasks),
+        [tasks, visibleIds]
+    );
+
     return {
-        nodes,
-        tasks,
+        nodes: scopedNodes,
+        tasks: scopedTasks,
+        user,
+        visibleIds,
         setNodes,
         setTasks,
         isConnected,
